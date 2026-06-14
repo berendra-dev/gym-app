@@ -2,8 +2,6 @@
 
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
-import { doc, getDoc, collection, query, where, getDocs, setDoc, serverTimestamp } from 'firebase/firestore'
-import { db } from '@/lib/firebase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -14,14 +12,19 @@ export default function CheckinPage() {
   const params = useParams()
   const gymId = params.gymId
   const [gym, setGym] = useState(null)
+  const [notFound, setNotFound] = useState(false)
   const [phone, setPhone] = useState('')
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState(null)
 
   useEffect(() => {
     (async () => {
-      const snap = await getDoc(doc(db, 'gyms', gymId))
-      if (snap.exists()) setGym(snap.data())
+      try {
+        const res = await fetch(`/api/public/gym/${gymId}`)
+        if (!res.ok) { setNotFound(true); return }
+        const data = await res.json()
+        setGym(data)
+      } catch (e) { setNotFound(true) }
     })()
   }, [gymId])
 
@@ -29,36 +32,20 @@ export default function CheckinPage() {
     e.preventDefault()
     setBusy(true); setResult(null)
     try {
-      // Find member by phone within this gym
-      const snap = await getDocs(query(collection(db, 'members'), where('gymId', '==', gymId), where('phone', '==', phone)))
-      if (snap.empty) { setResult({ ok: false, message: 'No member found with this phone number.' }); setBusy(false); return }
-      const member = snap.docs[0].data()
-      // Membership validation
-      const today = new Date().toISOString().slice(0, 10)
-      if (member.expiryDate && member.expiryDate < today) {
-        setResult({ ok: false, message: `Membership expired on ${member.expiryDate}. Please renew at reception.`, name: member.name })
-        setBusy(false); return
-      }
-      // Duplicate prevention via deterministic doc id
-      const docId = `${gymId}_${member.id}_${today}`
-      const existing = await getDoc(doc(db, 'attendance', docId))
-      if (existing.exists() && existing.data().status === 'present') {
-        setResult({ ok: true, message: `Already checked in today, ${member.name}!`, name: member.name, dupe: true })
-        setBusy(false); return
-      }
-      await setDoc(doc(db, 'attendance', docId), {
-        gymId, memberId: member.id, memberName: member.name,
-        date: today, status: 'present',
-        markedBy: 'qr_self_checkin', markedByRole: 'student',
-        markedAt: serverTimestamp(), manual: false,
+      const res = await fetch('/api/public/checkin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gymId, phone: phone.trim() }),
       })
-      setResult({ ok: true, message: `Welcome ${member.name}! Check-in successful.`, name: member.name })
-      setPhone('')
+      const data = await res.json()
+      setResult(data)
+      if (data.ok && !data.dupe) setPhone('')
     } catch (err) {
       setResult({ ok: false, message: err.message || 'Check-in failed' })
     } finally { setBusy(false) }
   }
 
+  if (notFound) return <div className="min-h-screen flex items-center justify-center p-6"><Card className="max-w-md"><CardHeader><CardTitle>Gym Not Found</CardTitle><CardDescription>This gym is inactive or doesn’t exist.</CardDescription></CardHeader></Card></div>
   if (!gym) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin text-orange-600" /></div>
 
   return (

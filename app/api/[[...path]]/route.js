@@ -47,6 +47,92 @@ async function handle(request, { params }) {
       }))
     }
 
+    // -------- PUBLIC ROUTES (no auth — for QR flows) --------
+    if (route.startsWith('/public/')) {
+      if (!adminDb) return withCORS(NextResponse.json({ error: 'server not configured' }, { status: 503 }))
+
+      // GET /api/public/gym/:gymId  — basic public gym info for QR landing
+      const gymInfoMatch = route.match(/^\/public\/gym\/([^\/]+)$/)
+      if (gymInfoMatch && method === 'GET') {
+        const gymId = gymInfoMatch[1]
+        const snap = await adminDb.collection('gyms').doc(gymId).get()
+        if (!snap.exists) return withCORS(NextResponse.json({ error: 'not found' }, { status: 404 }))
+        const g = snap.data()
+        if (g.status !== 'active') return withCORS(NextResponse.json({ error: 'gym not active' }, { status: 403 }))
+        return withCORS(NextResponse.json({ id: gymId, name: g.name, address: g.address || '', phone: g.phone || '' }))
+      }
+
+      // POST /api/public/checkin  body: { gymId, phone }
+      if (route === '/public/checkin' && method === 'POST') {
+        const { gymId, phone } = await request.json()
+        if (!gymId || !phone) return withCORS(NextResponse.json({ error: 'gymId and phone required' }, { status: 400 }))
+        const gymDoc = await adminDb.collection('gyms').doc(gymId).get()
+        if (!gymDoc.exists || gymDoc.data().status !== 'active') return withCORS(NextResponse.json({ error: 'gym not found or inactive' }, { status: 404 }))
+        const memSnap = await adminDb.collection('members').where('gymId', '==', gymId).where('phone', '==', phone).limit(1).get()
+        if (memSnap.empty) return withCORS(NextResponse.json({ ok: false, message: 'No member found with this phone number.' }))
+        const member = memSnap.docs[0].data()
+        const today = new Date().toISOString().slice(0, 10)
+        if (member.expiryDate && member.expiryDate < today) {
+          return withCORS(NextResponse.json({ ok: false, message: `Membership expired on ${member.expiryDate}. Please renew at reception.`, name: member.name }))
+        }
+        const docId = `${gymId}_${member.id}_${today}`
+        const existing = await adminDb.collection('attendance').doc(docId).get()
+        if (existing.exists && existing.data().status === 'present') {
+          return withCORS(NextResponse.json({ ok: true, dupe: true, message: `Already checked in today, ${member.name}!`, name: member.name }))
+        }
+        await adminDb.collection('attendance').doc(docId).set({
+          gymId, memberId: member.id, memberName: member.name,
+          date: today, status: 'present',
+          markedBy: 'qr_self_checkin', markedByRole: 'student',
+          markedAt: new Date(), manual: false,
+        })
+        return withCORS(NextResponse.json({ ok: true, message: `Welcome ${member.name}! Check-in successful.`, name: member.name }))
+      }
+
+      // POST /api/public/admission  body: { gymId, name, phone, email?, gender, plan, photoBase64? }
+      if (route === '/public/admission' && method === 'POST') {
+        const body = await request.json()
+        const { gymId, name, phone, email = '', gender = 'male', plan = 'monthly', photoBase64 } = body
+        if (!gymId || !name || !phone) return withCORS(NextResponse.json({ error: 'gymId, name, phone required' }, { status: 400 }))
+        const gymDoc = await adminDb.collection('gyms').doc(gymId).get()
+        if (!gymDoc.exists || gymDoc.data().status !== 'active') return withCORS(NextResponse.json({ error: 'gym not found or inactive' }, { status: 404 }))
+        const memberId = uuidv4()
+        let photoURL = null
+        if (photoBase64) {
+          try {
+            const admin = (await import('firebase-admin')).default
+            const bucket = admin.storage().bucket(process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET)
+            const m = photoBase64.match(/^data:(image\/[a-zA-Z+]+);base64,(.+)$/)
+            if (m) {
+              const contentType = m[1]
+              const buf = Buffer.from(m[2], 'base64')
+              const ext = contentType.split('/')[1].replace('+xml', '')
+              const filePath = `${gymId}/members/${memberId}/profile.${ext === 'jpeg' ? 'jpg' : ext}`
+              const file = bucket.file(filePath)
+              await file.save(buf, { metadata: { contentType }, public: true })
+              photoURL = `https://storage.googleapis.com/${bucket.name}/${filePath}`
+            }
+          } catch (e) { console.warn('[admission] photo upload failed:', e.message) }
+        }
+        const planMonths = plan === 'yearly' ? 12 : plan === 'halfyearly' ? 6 : plan === 'quarterly' ? 3 : 1
+        const joinDate = new Date()
+        const expiryDate = new Date(joinDate); expiryDate.setMonth(expiryDate.getMonth() + planMonths)
+        await adminDb.collection('admissionRequests').add({
+          id: memberId, gymId,
+          name, phone, email, gender, plan,
+          joinDate: joinDate.toISOString().slice(0, 10),
+          expiryDate: expiryDate.toISOString().slice(0, 10),
+          photoURL,
+          status: 'pending',
+          source: 'qr_public',
+          createdAt: new Date(),
+        })
+        return withCORS(NextResponse.json({ ok: true, memberId }))
+      }
+
+      return withCORS(NextResponse.json({ error: `public route not found: ${route}` }, { status: 404 }))
+    }
+
     // -------- ADMIN SDK ROUTES (all require auth) --------
     if (route.startsWith('/admin/')) {
       const caller = await getCaller(request)

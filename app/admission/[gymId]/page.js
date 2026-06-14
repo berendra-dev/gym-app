@@ -2,9 +2,6 @@
 
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
-import { doc, getDoc, addDoc, collection, serverTimestamp } from 'firebase/firestore'
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
-import { db, storage } from '@/lib/firebase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -12,7 +9,13 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from 'sonner'
 import { Dumbbell, CheckCircle2, Loader2, MapPin, Phone } from 'lucide-react'
-import { v4 as uuidv4 } from 'uuid'
+
+const fileToBase64 = (file) => new Promise((resolve, reject) => {
+  const r = new FileReader()
+  r.onload = () => resolve(r.result)
+  r.onerror = reject
+  r.readAsDataURL(file)
+})
 
 export default function AdmissionPage() {
   const params = useParams()
@@ -31,9 +34,9 @@ export default function AdmissionPage() {
   useEffect(() => {
     (async () => {
       try {
-        const snap = await getDoc(doc(db, 'gyms', gymId))
-        if (snap.exists() && snap.data().status === 'active') setGym(snap.data())
-        else setNotFound(true)
+        const res = await fetch(`/api/public/gym/${gymId}`)
+        if (!res.ok) { setNotFound(true); return }
+        setGym(await res.json())
       } catch (e) { setNotFound(true) }
     })()
   }, [gymId])
@@ -42,31 +45,21 @@ export default function AdmissionPage() {
     e.preventDefault()
     setSubmitting(true)
     try {
-      const memberId = uuidv4()
-      let photoURL = null
+      let photoBase64 = null
       if (photo) {
-        const r = ref(storage, `${gymId}/members/${memberId}/profile.jpg`)
-        await uploadBytes(r, photo)
-        photoURL = await getDownloadURL(r)
+        if (photo.size > 2 * 1024 * 1024) { toast.error('Photo must be under 2MB'); setSubmitting(false); return }
+        photoBase64 = await fileToBase64(photo)
       }
-      const planMonths = plan === 'yearly' ? 12 : plan === 'halfyearly' ? 6 : plan === 'quarterly' ? 3 : 1
-      const joinDate = new Date()
-      const expiryDate = new Date(joinDate); expiryDate.setMonth(expiryDate.getMonth() + planMonths)
-      await addDoc(collection(db, 'admissionRequests'), {
-        id: memberId,
-        gymId,
-        name, phone, email, gender, plan,
-        joinDate: joinDate.toISOString().slice(0, 10),
-        expiryDate: expiryDate.toISOString().slice(0, 10),
-        photoURL,
-        status: 'pending',
-        source: 'qr_public',
-        createdAt: serverTimestamp(),
+      const res = await fetch('/api/public/admission', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gymId, name, phone, email, gender, plan, photoBase64 }),
       })
+      const data = await res.json()
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Submission failed')
       setDone(true)
-    } catch (err) {
-      toast.error(err.message || 'Submission failed')
-    } finally { setSubmitting(false) }
+    } catch (err) { toast.error(err.message || 'Submission failed') }
+    finally { setSubmitting(false) }
   }
 
   if (notFound) return <div className="min-h-screen flex items-center justify-center p-6"><Card className="max-w-md"><CardHeader><CardTitle>Gym Not Found</CardTitle><CardDescription>This gym is inactive or doesn’t exist.</CardDescription></CardHeader></Card></div>
@@ -106,7 +99,7 @@ export default function AdmissionPage() {
                 <div><Label>Gender</Label><Select value={gender} onValueChange={setGender}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="male">Male</SelectItem><SelectItem value="female">Female</SelectItem><SelectItem value="other">Other</SelectItem></SelectContent></Select></div>
               </div>
               <div><Label>Plan</Label><Select value={plan} onValueChange={setPlan}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="monthly">Monthly</SelectItem><SelectItem value="quarterly">Quarterly</SelectItem><SelectItem value="halfyearly">Half-Yearly</SelectItem><SelectItem value="yearly">Yearly</SelectItem></SelectContent></Select></div>
-              <div><Label>Profile Photo</Label><Input type="file" accept="image/*" onChange={e => setPhoto(e.target.files?.[0] || null)} /></div>
+              <div><Label>Profile Photo (optional, max 2MB)</Label><Input type="file" accept="image/*" onChange={e => setPhoto(e.target.files?.[0] || null)} /></div>
               <Button type="submit" disabled={submitting} className="w-full bg-orange-600 hover:bg-orange-700">{submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Submit Application'}</Button>
             </form>
           </CardContent>
