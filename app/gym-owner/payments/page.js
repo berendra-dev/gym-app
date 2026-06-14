@@ -13,8 +13,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
+import { api } from '@/lib/api'
 import { toast } from 'sonner'
-import { Plus, Loader2, IndianRupee, AlertTriangle, Calendar } from 'lucide-react'
+import { Plus, Loader2, IndianRupee, AlertTriangle, Calendar, Bell } from 'lucide-react'
 import { v4 as uuidv4 } from 'uuid'
 
 function Page() {
@@ -128,8 +129,15 @@ function Page() {
           <h1 className="text-3xl font-bold tracking-tight">Payments & Renewals</h1>
           <p className="text-slate-500 mt-1">Renewal mode: <span className="font-medium text-slate-700">{gym?.renewalMode || 'expiry'}-based</span></p>
         </div>
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild><Button className="bg-orange-600 hover:bg-orange-700"><Plus className="w-4 h-4 mr-1" />Record Payment</Button></DialogTrigger>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={async () => {
+            try {
+              const r = await api.sendExpiryAlerts({ gymId: profile.gymId, daysAhead: 7 })
+              toast.success(`Alerts: ${r.totalCandidates} candidates · ${r.tokensSent} tokens · pushed ${r.push?.successCount ?? 0}`)
+            } catch (e) { toast.error(e.message) }
+          }}><Bell className="w-4 h-4 mr-1" />Send Expiry Alerts</Button>
+          <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild><Button className="bg-orange-600 hover:bg-orange-700"><Plus className="w-4 h-4 mr-1" />Record Payment</Button></DialogTrigger>
           <DialogContent>
             <DialogHeader><DialogTitle>Record Payment & Renew</DialogTitle><DialogDescription>Member expiry will auto-extend.</DialogDescription></DialogHeader>
             <form onSubmit={addPayment} className="space-y-3">
@@ -147,6 +155,7 @@ function Page() {
             </form>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

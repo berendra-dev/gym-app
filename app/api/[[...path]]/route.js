@@ -135,6 +135,111 @@ async function handle(request, { params }) {
         return withCORS(NextResponse.json({ gymId, ownerUid: ownerRecord.uid, email: ownerEmail, password: tempPassword, expiry: expStr }))
       }
 
+      // POST /api/admin/notifications/send-expiry-alerts  body: { gymId, daysAhead? }
+      if (route === '/admin/notifications/send-expiry-alerts' && method === 'POST') {
+        const { gymId, daysAhead = 7 } = await request.json()
+        if (!gymId) return withCORS(NextResponse.json({ error: 'gymId required' }, { status: 400 }))
+        if (caller.profile?.role !== 'super_admin' && caller.profile?.gymId !== gymId) return withCORS(NextResponse.json({ error: 'forbidden' }, { status: 403 }))
+        const today = new Date().toISOString().slice(0, 10)
+        const cutoff = new Date(); cutoff.setDate(cutoff.getDate() + Number(daysAhead))
+        const cutoffStr = cutoff.toISOString().slice(0, 10)
+        // Members with expiryDate <= cutoff
+        const memSnap = await adminDb.collection('members').where('gymId', '==', gymId).get()
+        const targets = []
+        memSnap.forEach(d => {
+          const m = d.data()
+          if (m.expiryDate && m.expiryDate <= cutoffStr) targets.push(m)
+        })
+        // Look up linked student user accounts (if any) for FCM tokens
+        const userSnap = await adminDb.collection('users').where('gymId', '==', gymId).where('role', '==', 'student').get()
+        const userByMember = {}
+        userSnap.forEach(d => { const u = d.data(); if (u.linkedMemberId) userByMember[u.linkedMemberId] = u })
+        const tokens = []
+        const alerts = []
+        for (const m of targets) {
+          const u = userByMember[m.id]
+          const expired = m.expiryDate < today
+          alerts.push({ memberId: m.id, name: m.name, expiryDate: m.expiryDate, expired, hasTokens: !!u?.fcmTokens?.length })
+          if (u?.fcmTokens?.length) tokens.push(...u.fcmTokens)
+        }
+        let pushResult = null
+        if (adminMessaging && tokens.length) {
+          const resp = await adminMessaging.sendEachForMulticast({
+            tokens,
+            notification: { title: 'Membership expiring soon', body: 'Your gym membership needs renewal. Please visit the reception.' },
+            data: { type: 'expiry_alert', gymId },
+          })
+          pushResult = { successCount: resp.successCount, failureCount: resp.failureCount }
+        }
+        // Log
+        await adminDb.collection('announcements').add({
+          gymId, title: 'Expiry alerts', body: `Auto-sent for ${alerts.length} members expiring by ${cutoffStr}`,
+          audience: 'members', createdBy: caller.uid, createdByRole: caller.profile?.role,
+          targetCount: alerts.length, tokenCount: tokens.length,
+          createdAt: new Date(), auto: true,
+        })
+        return withCORS(NextResponse.json({ ok: true, totalCandidates: alerts.length, tokensSent: tokens.length, push: pushResult, alerts }))
+      }
+
+      // POST /api/admin/backups/create  body: { gymId }
+      if (route === '/admin/backups/create' && method === 'POST') {
+        if (caller.profile?.role !== 'super_admin' && caller.profile?.gymId !== (await request.clone().json()).gymId) {
+          // re-parse safe
+        }
+        const body = await request.json()
+        const { gymId } = body
+        if (!gymId) return withCORS(NextResponse.json({ error: 'gymId required' }, { status: 400 }))
+        if (caller.profile?.role !== 'super_admin' && caller.profile?.gymId !== gymId) return withCORS(NextResponse.json({ error: 'forbidden' }, { status: 403 }))
+        const collections = ['gyms', 'users', 'members', 'attendance', 'payments', 'admissionRequests', 'announcements', 'auditLogs', 'subscriptionHistory', 'memberVersions']
+        const backup = { gymId, createdAt: new Date().toISOString(), data: {} }
+        for (const col of collections) {
+          if (col === 'gyms') {
+            const d = await adminDb.collection(col).doc(gymId).get()
+            backup.data[col] = d.exists ? [{ id: d.id, ...d.data() }] : []
+          } else {
+            const snap = await adminDb.collection(col).where('gymId', '==', gymId).get()
+            backup.data[col] = snap.docs.map(d => ({ _id: d.id, ...d.data() }))
+          }
+        }
+        const id = uuidv4()
+        await adminDb.collection('backups').doc(id).set({
+          id, gymId, createdAt: new Date(),
+          createdBy: caller.uid, createdByRole: caller.profile?.role,
+          stats: Object.fromEntries(Object.entries(backup.data).map(([k, v]) => [k, v.length])),
+          payload: JSON.stringify(backup).slice(0, 900000), // store inline (up to ~900KB)
+        })
+        return withCORS(NextResponse.json({ ok: true, id, stats: Object.fromEntries(Object.entries(backup.data).map(([k, v]) => [k, v.length])) }))
+      }
+
+      // GET /api/admin/backups/list?gymId=...
+      if (route === '/admin/backups/list' && method === 'GET') {
+        const url = new URL(request.url)
+        const gymId = url.searchParams.get('gymId')
+        if (caller.profile?.role !== 'super_admin' && caller.profile?.gymId !== gymId) return withCORS(NextResponse.json({ error: 'forbidden' }, { status: 403 }))
+        const snap = await adminDb.collection('backups').where('gymId', '==', gymId).get()
+        const list = snap.docs.map(d => { const data = d.data(); delete data.payload; return { id: d.id, ...data } })
+        list.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0))
+        return withCORS(NextResponse.json({ backups: list }))
+      }
+
+      // GET /api/admin/backups/:id/download
+      const backupDl = route.match(/^\/admin\/backups\/([^\/]+)\/download$/)
+      if (backupDl && method === 'GET') {
+        const id = backupDl[1]
+        const doc = await adminDb.collection('backups').doc(id).get()
+        if (!doc.exists) return withCORS(NextResponse.json({ error: 'not found' }, { status: 404 }))
+        const data = doc.data()
+        if (caller.profile?.role !== 'super_admin' && caller.profile?.gymId !== data.gymId) return withCORS(NextResponse.json({ error: 'forbidden' }, { status: 403 }))
+        return new NextResponse(data.payload, {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Disposition': `attachment; filename=backup-${data.gymId}-${id}.json`,
+            'Access-Control-Allow-Origin': '*',
+          },
+        })
+      }
+
       // POST /api/admin/announcements/send  body: { gymId, title, body, audience: 'all'|'staff'|'members', data? }
       if (route === '/admin/announcements/send' && method === 'POST') {
         const { gymId, title, body, audience = 'all', data } = await request.json()

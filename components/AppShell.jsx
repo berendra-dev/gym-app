@@ -1,14 +1,17 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/ui/button'
-import { Dumbbell, LogOut, Loader2 } from 'lucide-react'
+import { Dumbbell, LogOut, Loader2, Wifi, WifiOff } from 'lucide-react'
 
 const NAV = {
-  super_admin: [{ href: '/super-admin', label: 'Gyms' }],
+  super_admin: [
+    { href: '/super-admin', label: 'Gyms' },
+    { href: '/audit-logs', label: 'Audit Logs' },
+  ],
   gym_owner: [
     { href: '/gym-owner', label: 'Dashboard' },
     { href: '/gym-owner/members', label: 'Members' },
@@ -19,6 +22,8 @@ const NAV = {
     { href: '/gym-owner/trainers', label: 'Trainers' },
     { href: '/gym-owner/qr', label: 'QR' },
     { href: '/gym-owner/reports', label: 'Reports' },
+    { href: '/audit-logs', label: 'Audit' },
+    { href: '/gym-owner/backups', label: 'Backups' },
   ],
   receptionist: [
     { href: '/receptionist', label: 'Dashboard' },
@@ -38,6 +43,15 @@ export default function AppShell({ children, allow }) {
   const router = useRouter()
   const pathname = usePathname()
   const { user, profile, loading, logout } = useAuth()
+  const [online, setOnline] = useState(true)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    setOnline(navigator.onLine)
+    const on = () => setOnline(true), off = () => setOnline(false)
+    window.addEventListener('online', on); window.addEventListener('offline', off)
+    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off) }
+  }, [])
 
   useEffect(() => {
     if (loading) return
@@ -68,6 +82,10 @@ export default function AppShell({ children, allow }) {
             </nav>
           </div>
           <div className="flex items-center gap-3 shrink-0">
+            <div className={`hidden sm:flex items-center gap-1 text-xs px-2 py-1 rounded-md ${online ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`} title={online ? 'Online · synced' : 'Offline · changes will sync when online'}>
+              {online ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
+              {online ? 'Online' : 'Offline'}
+            </div>
             <div className="text-right hidden sm:block"><div className="text-sm font-medium text-slate-900">{profile.displayName || profile.email}</div><div className="text-xs text-slate-500">{roleLabel}</div></div>
             <Button variant="ghost" size="sm" onClick={logout}><LogOut className="w-4 h-4" /></Button>
           </div>

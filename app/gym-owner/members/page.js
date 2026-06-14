@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { collection, query, where, getDocs, addDoc, serverTimestamp, doc, deleteDoc } from 'firebase/firestore'
 import { db } from '@/lib/firebase/client'
 import { useAuth } from '@/contexts/AuthContext'
+import { api } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -13,7 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
-import { Plus, Loader2, Trash2, Phone, Calendar } from 'lucide-react'
+import { Plus, Loader2, Trash2, Phone, Calendar, KeyRound, Copy } from 'lucide-react'
 import { v4 as uuidv4 } from 'uuid'
 
 function Page() {
@@ -23,6 +24,7 @@ function Page() {
   const [open, setOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [search, setSearch] = useState('')
+  const [studentCreds, setStudentCreds] = useState(null)
 
   // form
   const [name, setName] = useState('')
@@ -77,6 +79,18 @@ function Page() {
     toast.success('Deleted'); refresh()
   }
 
+  const createLogin = async (m) => {
+    if (!m.email) { toast.error('Member must have an email to create login'); return }
+    try {
+      const r = await api.createUser({ email: m.email, displayName: m.name, role: 'student' })
+      // Link this auth user to the member record
+      const { updateDoc, doc: docFn } = await import('firebase/firestore')
+      await updateDoc(docFn(db, 'users', r.uid), { linkedMemberId: m.id })
+      setStudentCreds({ name: m.name, email: r.email, password: r.password })
+      toast.success('Student login created')
+    } catch (e) { toast.error(e.message) }
+  }
+
   const filtered = members.filter(m => !search || (m.name?.toLowerCase().includes(search.toLowerCase()) || m.phone?.includes(search)))
 
   return (
@@ -116,6 +130,18 @@ function Page() {
 
       <Input className="max-w-sm mb-4" placeholder="Search by name or phone…" value={search} onChange={e => setSearch(e.target.value)} />
 
+      {studentCreds && (
+        <Card className="mb-4 border-blue-300 bg-blue-50">
+          <CardContent className="pt-4 flex items-center gap-3 text-sm flex-wrap">
+            <div><strong>Login created for {studentCreds.name}:</strong></div>
+            <div className="font-mono bg-white px-2 py-1 rounded border">{studentCreds.email}</div>
+            <div className="font-mono bg-white px-2 py-1 rounded border">{studentCreds.password}</div>
+            <Button size="sm" variant="outline" onClick={() => { navigator.clipboard.writeText(`Email: ${studentCreds.email}\nPassword: ${studentCreds.password}`); toast.success('Copied') }}><Copy className="w-3 h-3 mr-1" />Copy</Button>
+            <Button size="sm" variant="ghost" onClick={() => setStudentCreds(null)}>Dismiss</Button>
+          </CardContent>
+        </Card>
+      )}
+
       {loading ? <div className="py-20 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-orange-600" /></div> : (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-3">
           {filtered.map(m => {
@@ -132,7 +158,10 @@ function Page() {
                     <Badge className={expired ? 'bg-red-600' : 'bg-emerald-600'}>{expired ? 'Expired' : m.plan}</Badge>
                   </div>
                   {!isReceptionist && (
-                    <Button size="sm" variant="ghost" className="text-red-600 mt-3 h-7 px-2" onClick={() => handleDelete(m)}><Trash2 className="w-3 h-3 mr-1" />Delete</Button>
+                    <div className="flex gap-1 mt-3">
+                      <Button size="sm" variant="ghost" className="text-blue-600 h-7 px-2" onClick={() => createLogin(m)}><KeyRound className="w-3 h-3 mr-1" />Create Login</Button>
+                      <Button size="sm" variant="ghost" className="text-red-600 h-7 px-2" onClick={() => handleDelete(m)}><Trash2 className="w-3 h-3 mr-1" />Delete</Button>
+                    </div>
                   )}
                 </CardContent>
               </Card>
