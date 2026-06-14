@@ -3,7 +3,8 @@
 import AppShell from '@/components/AppShell'
 import { useEffect, useState } from 'react'
 import { collection, query, where, getDocs, doc, getDoc, setDoc, serverTimestamp, updateDoc } from 'firebase/firestore'
-import { db, createUserWithoutSignout } from '@/lib/firebase/client'
+import { db } from '@/lib/firebase/client'
+import { api } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -51,17 +52,11 @@ function Page() {
     if (!isPremium) { toast.error('Trainers are a Premium plan feature'); return }
     setBusy(true)
     try {
-      const tempPassword = genPwd()
-      const uid = await createUserWithoutSignout(email, tempPassword)
-      await setDoc(doc(db, 'users', uid), {
-        uid, email, displayName: name,
-        role: 'trainer', gymId: profile.gymId,
-        mustChangePassword: true,
-        createdAt: serverTimestamp(), createdBy: profile.uid,
-      })
-      setCreds({ email, password: tempPassword, name })
+      // Secure server-side creation with custom claims
+      const result = await api.createUser({ email, displayName: name, role: 'trainer' })
+      setCreds({ email: result.email, password: result.password, name })
       setName(''); setEmail(''); setOpen(false); refresh()
-      toast.success('Trainer created')
+      toast.success('Trainer created (secure)')
     } catch (err) { toast.error(err.message) } finally { setBusy(false) }
   }
 

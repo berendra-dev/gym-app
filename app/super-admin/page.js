@@ -3,7 +3,8 @@
 import AppShell from '@/components/AppShell'
 import { useEffect, useState } from 'react'
 import { collection, addDoc, doc, setDoc, getDocs, query, orderBy, serverTimestamp, updateDoc } from 'firebase/firestore'
-import { db, createUserWithoutSignout } from '@/lib/firebase/client'
+import { db } from '@/lib/firebase/client'
+import { api } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -61,33 +62,15 @@ function Page() {
     e.preventDefault()
     setCreating(true)
     try {
-      const tempPassword = genPwd()
-      const ownerUid = await createUserWithoutSignout(ownerEmail, tempPassword)
-      const gymId = uuidv4()
-      const defaultExpiry = new Date(); defaultExpiry.setMonth(defaultExpiry.getMonth() + 1)
-      await setDoc(doc(db, 'gyms', gymId), {
-        id: gymId, name: gymName, address: gymAddress, phone: gymPhone,
-        ownerUid, ownerEmail, ownerName, plan,
-        subscriptionExpiry: defaultExpiry.toISOString().slice(0, 10),
-        renewalMode: 'expiry', gracePeriodDays: 3,
-        status: 'active',
-        createdAt: serverTimestamp(), createdBy: profile.uid,
+      // Secure server-side gym creation via Admin SDK (sets custom claims)
+      const result = await api.createGym({
+        name: gymName, address: gymAddress, phone: gymPhone,
+        ownerName, ownerEmail, plan,
       })
-      await setDoc(doc(db, 'users', ownerUid), {
-        uid: ownerUid, email: ownerEmail, displayName: ownerName,
-        role: 'gym_owner', gymId, mustChangePassword: true,
-        createdAt: serverTimestamp(),
-      })
-      // subscription history
-      await addDoc(collection(db, 'subscriptionHistory'), {
-        gymId, plan, action: 'created',
-        expiryDate: defaultExpiry.toISOString().slice(0, 10),
-        performedBy: profile.uid, timestamp: serverTimestamp(),
-      })
-      setCreds({ email: ownerEmail, password: tempPassword, gymName })
+      setCreds({ email: result.email, password: result.password, gymName })
       setGymName(''); setGymAddress(''); setGymPhone(''); setOwnerName(''); setOwnerEmail(''); setPlan('basic')
       setOpen(false); refresh()
-      toast.success('Gym created')
+      toast.success('Gym created via secure server API')
     } catch (err) { toast.error(err.message) } finally { setCreating(false) }
   }
 

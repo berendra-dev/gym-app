@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createUserWithEmailAndPassword } from 'firebase/auth'
 import { doc, setDoc, serverTimestamp, collection, query, where, getDocs, limit } from 'firebase/firestore'
 import { auth, db } from '@/lib/firebase/client'
+import { api } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -46,6 +47,10 @@ export default function SetupPage() {
         mustChangePassword: false,
         createdAt: serverTimestamp(),
       })
+      try {
+        await api.syncClaimsSelf()
+        await auth.currentUser.getIdToken(true)
+      } catch (e) { console.warn('Claim sync failed (non-fatal):', e.message) }
       toast.success('Super Admin created. Redirecting…')
       router.push('/dashboard')
     } catch (err) {
