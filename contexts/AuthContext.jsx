@@ -1,16 +1,20 @@
 'use client'
 
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useState, useRef } from 'react'
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth'
-import { doc, getDoc, onSnapshot } from 'firebase/firestore'
+import { doc, onSnapshot, updateDoc, serverTimestamp } from 'firebase/firestore'
+import { v4 as uuidv4 } from 'uuid'
 import { auth, db } from '@/lib/firebase/client'
+import { toast } from 'sonner'
 
 const AuthContext = createContext(null)
+const SESSION_KEY = 'gymtain_session'
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null)        // firebase auth user
-  const [profile, setProfile] = useState(null)  // firestore users/{uid}
+  const [user, setUser] = useState(null)
+  const [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(true)
+  const justLoggedIn = useRef(false)
 
   useEffect(() => {
     let unsubProfile = null
@@ -20,11 +24,19 @@ export function AuthProvider({ children }) {
         setUser(null); setProfile(null); setLoading(false); return
       }
       setUser(fbUser)
-      // Live listen to profile (role, gymId, mustChangePassword)
       const ref = doc(db, 'users', fbUser.uid)
       unsubProfile = onSnapshot(ref, (snap) => {
-        if (snap.exists()) setProfile({ uid: fbUser.uid, ...snap.data() })
-        else setProfile({ uid: fbUser.uid, role: null })
+        if (!snap.exists()) { setProfile({ uid: fbUser.uid, role: null }); setLoading(false); return }
+        const data = snap.data()
+        // Single-device login enforcement
+        const localSession = typeof window !== 'undefined' ? localStorage.getItem(SESSION_KEY) : null
+        if (data.activeSessionId && localSession && data.activeSessionId !== localSession) {
+          // another device took over
+          localStorage.removeItem(SESSION_KEY)
+          signOut(auth).then(() => toast.error('Signed out: your account is active on another device'))
+          return
+        }
+        setProfile({ uid: fbUser.uid, ...data })
         setLoading(false)
       }, () => { setLoading(false) })
     })
@@ -33,14 +45,25 @@ export function AuthProvider({ children }) {
 
   const login = async (email, password) => {
     await signInWithEmailAndPassword(auth, email, password)
+    const sessionId = uuidv4()
+    if (typeof window !== 'undefined') localStorage.setItem(SESSION_KEY, sessionId)
+    try {
+      await updateDoc(doc(db, 'users', auth.currentUser.uid), {
+        activeSessionId: sessionId,
+        lastLoginAt: serverTimestamp(),
+        lastLoginDevice: typeof navigator !== 'undefined' ? navigator.userAgent.slice(0, 200) : null,
+      })
+    } catch (e) { /* doc may not yet have these fields */ }
   }
-  const logout = async () => { await signOut(auth) }
+  const logout = async () => {
+    try {
+      if (auth.currentUser) await updateDoc(doc(db, 'users', auth.currentUser.uid), { activeSessionId: null })
+    } catch (e) {}
+    if (typeof window !== 'undefined') localStorage.removeItem(SESSION_KEY)
+    await signOut(auth)
+  }
 
-  return (
-    <AuthContext.Provider value={{ user, profile, loading, login, logout }}>
-      {children}
-    </AuthContext.Provider>
-  )
+  return <AuthContext.Provider value={{ user, profile, loading, login, logout }}>{children}</AuthContext.Provider>
 }
 
 export const useAuth = () => useContext(AuthContext)
