@@ -5,6 +5,7 @@ import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebas
 import { doc, onSnapshot, updateDoc, serverTimestamp } from 'firebase/firestore'
 import { v4 as uuidv4 } from 'uuid'
 import { auth, db } from '@/lib/firebase/client'
+import { initFCM } from '@/lib/firebase/messaging'
 import { toast } from 'sonner'
 
 const AuthContext = createContext(null)
@@ -54,6 +55,8 @@ export function AuthProvider({ children }) {
         lastLoginDevice: typeof navigator !== 'undefined' ? navigator.userAgent.slice(0, 200) : null,
       })
     } catch (e) { /* doc may not yet have these fields */ }
+    // Register for FCM push notifications (non-blocking, asks permission on first login)
+    initFCM(auth.currentUser.uid).catch(() => {})
   }
   const logout = async () => {
     try {

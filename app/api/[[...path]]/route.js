@@ -135,6 +135,60 @@ async function handle(request, { params }) {
         return withCORS(NextResponse.json({ gymId, ownerUid: ownerRecord.uid, email: ownerEmail, password: tempPassword, expiry: expStr }))
       }
 
+      // POST /api/admin/announcements/send  body: { gymId, title, body, audience: 'all'|'staff'|'members', data? }
+      if (route === '/admin/announcements/send' && method === 'POST') {
+        const { gymId, title, body, audience = 'all', data } = await request.json()
+        // Authorization: super_admin always; gym_owner/receptionist only for their own gym
+        const callerRole = caller.profile?.role
+        if (!gymId || !title || !body) return withCORS(NextResponse.json({ error: 'gymId, title, body required' }, { status: 400 }))
+        if (callerRole !== 'super_admin' && !(['gym_owner', 'receptionist'].includes(callerRole) && caller.profile.gymId === gymId)) {
+          return withCORS(NextResponse.json({ error: 'forbidden' }, { status: 403 }))
+        }
+        // Gather target users + tokens
+        const staffRoles = ['gym_owner', 'receptionist', 'trainer']
+        let q = adminDb.collection('users').where('gymId', '==', gymId)
+        const snap = await q.get()
+        const tokens = []
+        const targets = []
+        snap.forEach(d => {
+          const u = d.data()
+          const isStaff = staffRoles.includes(u.role)
+          const include = audience === 'all' || (audience === 'staff' && isStaff) || (audience === 'members' && u.role === 'student')
+          if (include && Array.isArray(u.fcmTokens)) { tokens.push(...u.fcmTokens); targets.push(d.id) }
+        })
+        // Persist announcement (history)
+        const annRef = await adminDb.collection('announcements').add({
+          gymId, title, body, audience, data: data || null,
+          createdBy: caller.uid, createdByRole: callerRole,
+          createdAt: new Date(),
+          targetCount: targets.length, tokenCount: tokens.length,
+        })
+        // Send FCM if available
+        let pushResult = null
+        if (adminMessaging && tokens.length) {
+          const resp = await adminMessaging.sendEachForMulticast({
+            tokens,
+            notification: { title, body },
+            data: { announcementId: annRef.id, gymId, ...(data ? Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)])) : {}) },
+          })
+          pushResult = { successCount: resp.successCount, failureCount: resp.failureCount }
+          // Best-effort: remove invalid tokens
+          const invalid = []
+          resp.responses.forEach((r, i) => {
+            if (!r.success && ['messaging/invalid-registration-token', 'messaging/registration-token-not-registered'].includes(r.error?.code)) invalid.push(tokens[i])
+          })
+          if (invalid.length) {
+            const updates = snap.docs.map(async (d) => {
+              const ft = d.data().fcmTokens || []
+              const cleaned = ft.filter(t => !invalid.includes(t))
+              if (cleaned.length !== ft.length) await d.ref.update({ fcmTokens: cleaned })
+            })
+            await Promise.all(updates)
+          }
+        }
+        return withCORS(NextResponse.json({ ok: true, announcementId: annRef.id, targets: targets.length, tokens: tokens.length, push: pushResult }))
+      }
+
       // POST /api/admin/notifications/send  body: { tokens: [], title, body, data? }
       if (route === '/admin/notifications/send' && method === 'POST') {
         if (!adminMessaging) return withCORS(NextResponse.json({ error: 'FCM not configured' }, { status: 503 }))
