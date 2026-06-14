@@ -18,7 +18,7 @@ import { Dumbbell, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react'
 const ROLE_REDIRECT = {
   super_admin: '/super-admin',
   gym_owner:   '/owner',
-  receptionist:'/reception',
+  receptionist:'/receptionist',
   trainer:     '/trainer',
   student:     '/student',
 }

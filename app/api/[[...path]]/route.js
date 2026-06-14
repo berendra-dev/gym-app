@@ -62,14 +62,20 @@ async function handle(request, { params }) {
         return withCORS(NextResponse.json({ id: gymId, name: g.name, address: g.address || '', phone: g.phone || '' }))
       }
 
-      // POST /api/public/checkin  body: { gymId, phone }
+      // POST /api/public/checkin  body: { gymId, phone? OR memberId? }
       if (route === '/public/checkin' && method === 'POST') {
-        const { gymId, phone } = await request.json()
-        if (!gymId || !phone) return withCORS(NextResponse.json({ error: 'gymId and phone required' }, { status: 400 }))
+        const { gymId, phone, memberId } = await request.json()
+        if (!gymId || (!phone && !memberId)) return withCORS(NextResponse.json({ error: 'gymId and (phone or memberId) required' }, { status: 400 }))
         const gymDoc = await adminDb.collection('gyms').doc(gymId).get()
         if (!gymDoc.exists || gymDoc.data().status !== 'active') return withCORS(NextResponse.json({ error: 'gym not found or inactive' }, { status: 404 }))
-        const memSnap = await adminDb.collection('members').where('gymId', '==', gymId).where('phone', '==', phone).limit(1).get()
-        if (memSnap.empty) return withCORS(NextResponse.json({ ok: false, message: 'No member found with this phone number.' }))
+        // Look up member by memberId (preferred) or phone
+        let memSnap
+        if (memberId) {
+          memSnap = await adminDb.collection('members').where('gymId', '==', gymId).where('id', '==', memberId).limit(1).get()
+        } else {
+          memSnap = await adminDb.collection('members').where('gymId', '==', gymId).where('phone', '==', phone).limit(1).get()
+        }
+        if (memSnap.empty) return withCORS(NextResponse.json({ ok: false, message: 'No member found.' }))
         const member = memSnap.docs[0].data()
         const today = new Date().toISOString().slice(0, 10)
         if (member.expiryDate && member.expiryDate < today) {

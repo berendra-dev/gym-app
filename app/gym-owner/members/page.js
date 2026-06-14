@@ -14,7 +14,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
-import { Plus, Loader2, Trash2, Phone, Calendar, KeyRound, Copy } from 'lucide-react'
+import { Plus, Loader2, Trash2, Phone, Calendar, KeyRound, Copy, QrCode } from 'lucide-react'
+import MemberQRDialog from '@/components/MemberQRDialog'
 import { v4 as uuidv4 } from 'uuid'
 
 function Page() {
@@ -25,6 +26,7 @@ function Page() {
   const [saving, setSaving] = useState(false)
   const [search, setSearch] = useState('')
   const [studentCreds, setStudentCreds] = useState(null)
+  const [qrMember, setQrMember] = useState(null)
 
   // form
   const [name, setName] = useState('')
@@ -157,12 +159,15 @@ function Page() {
                     </div>
                     <Badge className={expired ? 'bg-red-600' : 'bg-emerald-600'}>{expired ? 'Expired' : m.plan}</Badge>
                   </div>
-                  {!isReceptionist && (
-                    <div className="flex gap-1 mt-3">
-                      <Button size="sm" variant="ghost" className="text-blue-600 h-7 px-2" onClick={() => createLogin(m)}><KeyRound className="w-3 h-3 mr-1" />Create Login</Button>
-                      <Button size="sm" variant="ghost" className="text-red-600 h-7 px-2" onClick={() => handleDelete(m)}><Trash2 className="w-3 h-3 mr-1" />Delete</Button>
-                    </div>
-                  )}
+                  <div className="flex gap-1 mt-3 flex-wrap">
+                    <Button size="sm" variant="ghost" className="text-orange-600 h-7 px-2" onClick={() => setQrMember(m)}><QrCode className="w-3 h-3 mr-1" />QR</Button>
+                    {!isReceptionist && (
+                      <>
+                        <Button size="sm" variant="ghost" className="text-blue-600 h-7 px-2" onClick={() => createLogin(m)}><KeyRound className="w-3 h-3 mr-1" />Login</Button>
+                        <Button size="sm" variant="ghost" className="text-red-600 h-7 px-2" onClick={() => handleDelete(m)}><Trash2 className="w-3 h-3 mr-1" />Delete</Button>
+                      </>
+                    )}
+                  </div>
                 </CardContent>
               </Card>
             )
@@ -170,6 +175,7 @@ function Page() {
           {!filtered.length && <p className="text-slate-500 col-span-3 text-center py-12">No members yet. Add your first one!</p>}
         </div>
       )}
+      <MemberQRDialog open={!!qrMember} onOpenChange={(o) => !o && setQrMember(null)} member={qrMember} gymId={profile?.gymId} />
     </div>
   )
 }

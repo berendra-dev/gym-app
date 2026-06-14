@@ -20,6 +20,7 @@ const NAV = {
     { href: '/gym-owner/admissions', label: 'Admissions' },
     { href: '/gym-owner/announcements', label: 'Announcements' },
     { href: '/gym-owner/trainers', label: 'Trainers' },
+    { href: '/gym-owner/receptionists', label: 'Receptionists' },
     { href: '/gym-owner/qr', label: 'QR' },
     { href: '/gym-owner/reports', label: 'Reports' },
     { href: '/audit-logs', label: 'Audit' },
