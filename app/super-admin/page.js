@@ -2,7 +2,7 @@
 
 import AppShell from '@/components/AppShell'
 import { useEffect, useState } from 'react'
-import { collection, addDoc, doc, setDoc, getDocs, query, orderBy, serverTimestamp, updateDoc } from 'firebase/firestore'
+import { collection, addDoc, doc, setDoc, getDocs, getDocsFromServer, query, orderBy, serverTimestamp, updateDoc } from 'firebase/firestore'
 import { db } from '@/lib/firebase/client'
 import { api } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toast } from 'sonner'
-import { Building2, Plus, Loader2, Copy, Pause, Play, Trash2, RotateCcw, Settings, Crown } from 'lucide-react'
+import { Building2, Plus, Loader2, Copy, Pause, Play, Trash2, RotateCcw, Settings, Crown, RefreshCw } from 'lucide-react'
 import { v4 as uuidv4 } from 'uuid'
 
 function Page() {
@@ -45,9 +45,28 @@ function Page() {
   const refresh = async () => {
     setLoading(true)
     try {
-      const snap = await getDocs(query(collection(db, 'gyms'), orderBy('createdAt', 'desc')))
-      setGyms(snap.docs.map(d => ({ id: d.id, ...d.data() })))
-    } catch (e) { toast.error('Could not load gyms: ' + e.message) }
+      // Bypass IndexedDB cache - always fetch from server to show latest gyms
+      let snap
+      try {
+        snap = await getDocsFromServer(query(collection(db, 'gyms'), orderBy('createdAt', 'desc')))
+      } catch (orderErr) {
+        // If orderBy fails (e.g., missing field), fall back to plain collection scan
+        console.warn('[SuperAdmin] orderBy failed, falling back:', orderErr.message)
+        snap = await getDocsFromServer(collection(db, 'gyms'))
+      }
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      // Client-side sort by createdAt desc (handles missing fields)
+      list.sort((a, b) => {
+        const at = a.createdAt?.toMillis?.() || a.createdAt?.seconds * 1000 || 0
+        const bt = b.createdAt?.toMillis?.() || b.createdAt?.seconds * 1000 || 0
+        return bt - at
+      })
+      console.log('[SuperAdmin] Loaded', list.length, 'gyms')
+      setGyms(list)
+    } catch (e) {
+      console.error('[SuperAdmin] Could not load gyms:', e)
+      toast.error('Could not load gyms: ' + e.message)
+    }
     setLoading(false)
   }
   useEffect(() => { refresh() }, [])
@@ -121,6 +140,8 @@ function Page() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <div><h1 className="text-3xl font-bold tracking-tight">Platform Control</h1><p className="text-slate-500 mt-1">Manage gyms, subscriptions, and access.</p></div>
+        <div className="flex gap-2">
+        <Button variant="outline" onClick={refresh}><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild><Button className="bg-orange-600 hover:bg-orange-700"><Plus className="w-4 h-4 mr-1" /> New Gym</Button></DialogTrigger>
           <DialogContent className="max-w-lg">
@@ -134,6 +155,7 @@ function Page() {
             </form>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       {creds && (
