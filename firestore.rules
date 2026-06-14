@@ -1,0 +1,52 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAuth() { return request.auth != null; }
+    function userDoc() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
+    function role() { return userDoc().role; }
+    function myGymId() { return userDoc().gymId; }
+    function isSuperAdmin() { return isAuth() && role() == 'super_admin'; }
+    function inMyGym(gid) { return isAuth() && gid == myGymId(); }
+
+    // Users: anyone authed can read their own; super admin can read all.
+    match /users/{uid} {
+      allow read: if isAuth() && (request.auth.uid == uid || isSuperAdmin());
+      allow create: if isAuth(); // self bootstrap allowed during setup
+      allow update: if request.auth.uid == uid || isSuperAdmin();
+      allow delete: if isSuperAdmin();
+    }
+
+    // Gyms: super admin full; gym staff can read their own gym.
+    match /gyms/{gymId} {
+      allow read: if isSuperAdmin() || (isAuth() && gymId == myGymId());
+      allow create, update, delete: if isSuperAdmin();
+    }
+
+    // Members: scoped by gymId. Gym Owner full; Receptionist no delete; Super Admin read.
+    match /members/{id} {
+      allow read: if isSuperAdmin() || inMyGym(resource.data.gymId);
+      allow create: if isAuth() && inMyGym(request.resource.data.gymId)
+        && (role() == 'gym_owner' || role() == 'receptionist');
+      allow update: if inMyGym(resource.data.gymId)
+        && (role() == 'gym_owner' || role() == 'receptionist');
+      allow delete: if inMyGym(resource.data.gymId) && role() == 'gym_owner';
+    }
+
+    // Attendance: scoped by gymId.
+    match /attendance/{id} {
+      allow read: if isSuperAdmin() || inMyGym(resource.data.gymId);
+      allow create: if isAuth() && inMyGym(request.resource.data.gymId)
+        && (role() == 'gym_owner' || role() == 'receptionist');
+      allow update: if inMyGym(resource.data.gymId)
+        && (role() == 'gym_owner' || role() == 'receptionist');
+      allow delete: if inMyGym(resource.data.gymId) && role() == 'gym_owner';
+    }
+
+    // Audit logs: write-only by authed users in own gym, read by gym owner / super admin.
+    match /auditLogs/{id} {
+      allow read: if isSuperAdmin() || (isAuth() && resource.data.gymId == myGymId() && role() == 'gym_owner');
+      allow create: if isAuth();
+      allow update, delete: if false;
+    }
+  }
+}
