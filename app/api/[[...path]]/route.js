@@ -332,6 +332,79 @@ async function handle(request, { params }) {
         })
       }
 
+      // POST /api/admin/users/reset-password  body: { uid }  →  returns new temp password
+      if (route === '/admin/users/reset-password' && method === 'POST') {
+        if (caller.profile?.role !== 'super_admin') return withCORS(NextResponse.json({ error: 'forbidden' }, { status: 403 }))
+        const { uid } = await request.json()
+        if (!uid) return withCORS(NextResponse.json({ error: 'uid required' }, { status: 400 }))
+        const newPassword = genTempPassword()
+        await adminAuth.updateUser(uid, { password: newPassword })
+        await adminAuth.revokeRefreshTokens(uid)
+        await adminDb.collection('users').doc(uid).update({ mustChangePassword: true })
+        await adminDb.collection('auditLogs').add({
+          gymId: null, action: 'password.reset',
+          targetType: 'user', targetId: uid,
+          performedBy: caller.uid, performedByRole: 'super_admin',
+          timestamp: new Date(),
+        })
+        return withCORS(NextResponse.json({ ok: true, password: newPassword }))
+      }
+
+      // GET /api/admin/users/list — list all users (super admin only)
+      if (route === '/admin/users/list' && method === 'GET') {
+        if (caller.profile?.role !== 'super_admin') return withCORS(NextResponse.json({ error: 'forbidden' }, { status: 403 }))
+        const snap = await adminDb.collection('users').get()
+        const users = snap.docs.map(d => { const x = d.data(); return { uid: d.id, email: x.email, displayName: x.displayName, role: x.role, gymId: x.gymId, mustChangePassword: x.mustChangePassword } })
+        return withCORS(NextResponse.json({ users }))
+      }
+
+      // POST /api/admin/plans/save  body: { id?, gymId|null, name, durationMonths, price, currency?, offerName?, discountPct?, discountFlat?, active }
+      if (route === '/admin/plans/save' && method === 'POST') {
+        const callerRole = caller.profile?.role
+        const body = await request.json()
+        const isGlobal = !body.gymId
+        if (isGlobal && callerRole !== 'super_admin') return withCORS(NextResponse.json({ error: 'only super_admin can manage global plans' }, { status: 403 }))
+        if (!isGlobal && callerRole !== 'super_admin' && (callerRole !== 'gym_owner' || caller.profile.gymId !== body.gymId)) {
+          return withCORS(NextResponse.json({ error: 'forbidden' }, { status: 403 }))
+        }
+        if (!body.name || !body.durationMonths || body.price === undefined) return withCORS(NextResponse.json({ error: 'name, durationMonths, price required' }, { status: 400 }))
+        const planId = body.id || uuidv4()
+        const planDoc = {
+          id: planId,
+          gymId: isGlobal ? null : body.gymId,
+          name: body.name,
+          durationMonths: Number(body.durationMonths),
+          price: Number(body.price),
+          currency: body.currency || 'INR',
+          offerName: body.offerName || null,
+          discountPct: body.discountPct ? Number(body.discountPct) : 0,
+          discountFlat: body.discountFlat ? Number(body.discountFlat) : 0,
+          active: body.active !== false,
+          updatedAt: new Date(),
+          updatedBy: caller.uid,
+        }
+        if (!body.id) { planDoc.createdAt = new Date(); planDoc.createdBy = caller.uid }
+        await adminDb.collection('subscriptionPlans').doc(planId).set(planDoc, { merge: true })
+        return withCORS(NextResponse.json({ ok: true, planId, plan: planDoc }))
+      }
+
+      // DELETE /api/admin/plans/:id
+      const planDelMatch = route.match(/^\/admin\/plans\/([^\/]+)$/)
+      if (planDelMatch && method === 'DELETE') {
+        const planId = planDelMatch[1]
+        const planSnap = await adminDb.collection('subscriptionPlans').doc(planId).get()
+        if (!planSnap.exists) return withCORS(NextResponse.json({ error: 'not found' }, { status: 404 }))
+        const plan = planSnap.data()
+        const callerRole = caller.profile?.role
+        const isGlobal = !plan.gymId
+        if (isGlobal && callerRole !== 'super_admin') return withCORS(NextResponse.json({ error: 'forbidden' }, { status: 403 }))
+        if (!isGlobal && callerRole !== 'super_admin' && (callerRole !== 'gym_owner' || caller.profile.gymId !== plan.gymId)) {
+          return withCORS(NextResponse.json({ error: 'forbidden' }, { status: 403 }))
+        }
+        await adminDb.collection('subscriptionPlans').doc(planId).delete()
+        return withCORS(NextResponse.json({ ok: true }))
+      }
+
       // POST /api/admin/announcements/send  body: { gymId, title, body, audience: 'all'|'staff'|'members', data? }
       if (route === '/admin/announcements/send' && method === 'POST') {
         const { gymId, title, body, audience = 'all', data } = await request.json()

@@ -2,7 +2,7 @@
 
 import AppShell from '@/components/AppShell'
 import { useEffect, useState } from 'react'
-import { collection, query, where, getDocs, addDoc, serverTimestamp, doc, deleteDoc } from 'firebase/firestore'
+import { collection, query, where, getDocs, addDoc, serverTimestamp, doc, deleteDoc, onSnapshot } from 'firebase/firestore'
 import { db } from '@/lib/firebase/client'
 import { useAuth } from '@/contexts/AuthContext'
 import { api } from '@/lib/api'
@@ -27,6 +27,31 @@ function Page() {
   const [search, setSearch] = useState('')
   const [studentCreds, setStudentCreds] = useState(null)
   const [qrMember, setQrMember] = useState(null)
+
+  // Real-time subscription plans (global + own gym)
+  const [plans, setPlans] = useState([])
+  const [selectedPlanId, setSelectedPlanId] = useState('')
+  const [customDiscount, setCustomDiscount] = useState(0)
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'subscriptionPlans'), (snap) => {
+      const list = snap.docs.map(d => ({ ...d.data(), id: d.id }))
+        .filter(p => p.active && (!p.gymId || p.gymId === profile?.gymId))
+      list.sort((a, b) => (a.durationMonths || 0) - (b.durationMonths || 0))
+      setPlans(list)
+    })
+    return () => unsub()
+  }, [profile])
+
+  const selectedPlan = plans.find(p => p.id === selectedPlanId)
+  const computePrice = (p, extraDiscount = 0) => {
+    if (!p) return 0
+    let f = p.price || 0
+    if (p.discountPct) f = f * (1 - p.discountPct / 100)
+    if (p.discountFlat) f = f - p.discountFlat
+    if (extraDiscount) f = f - Number(extraDiscount)
+    return Math.max(0, Math.round(f))
+  }
+  const finalPrice = computePrice(selectedPlan, customDiscount)
 
   // form
   const [name, setName] = useState('')
@@ -59,17 +84,32 @@ function Page() {
     setSaving(true)
     try {
       const id = uuidv4()
+      let appliedPlan = plan
+      let computedExpiry = expiryDate
+      let priceInfo = null
+      if (selectedPlan) {
+        appliedPlan = selectedPlan.name
+        const exp = new Date(joinDate)
+        exp.setMonth(exp.getMonth() + (selectedPlan.durationMonths || 1))
+        computedExpiry = exp.toISOString().slice(0, 10)
+        priceInfo = {
+          planId: selectedPlan.id, planName: selectedPlan.name,
+          basePrice: selectedPlan.price, discountPct: selectedPlan.discountPct || 0,
+          discountFlat: selectedPlan.discountFlat || 0, offerName: selectedPlan.offerName || null,
+          customDiscount: Number(customDiscount) || 0,
+          finalPrice,
+        }
+      }
       await addDoc(collection(db, 'members'), {
-        id,
-        gymId: profile.gymId,
-        name, phone, email, gender, plan,
-        joinDate, expiryDate,
+        id, gymId: profile.gymId,
+        name, phone, email, gender, plan: appliedPlan,
+        joinDate, expiryDate: computedExpiry,
         status: 'active',
-        createdAt: serverTimestamp(),
-        createdBy: profile.uid,
+        pricing: priceInfo,
+        createdAt: serverTimestamp(), createdBy: profile.uid,
       })
-      toast.success('Member added')
-      setName(''); setPhone(''); setEmail('')
+      toast.success(selectedPlan ? `Member added · ₹${finalPrice} for ${selectedPlan.durationMonths}mo` : 'Member added')
+      setName(''); setPhone(''); setEmail(''); setSelectedPlanId(''); setCustomDiscount(0)
       setOpen(false); refresh()
     } catch (err) { toast.error(err.message) } finally { setSaving(false) }
   }
@@ -118,12 +158,56 @@ function Page() {
                 </div>
               </div>
               <div className="grid grid-cols-3 gap-3">
-                <div><Label>Plan</Label>
+                <div><Label>Plan (legacy)</Label>
                   <Select value={plan} onValueChange={setPlan}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="monthly">Monthly</SelectItem><SelectItem value="quarterly">Quarterly</SelectItem><SelectItem value="halfyearly">Half-Yearly</SelectItem><SelectItem value="yearly">Yearly</SelectItem></SelectContent></Select>
                 </div>
                 <div><Label>Join Date</Label><Input type="date" required value={joinDate} onChange={e => setJoinDate(e.target.value)} /></div>
                 <div><Label>Expiry Date</Label><Input type="date" required value={expiryDate} onChange={e => setExpiryDate(e.target.value)} /></div>
               </div>
+              {plans.length > 0 && (
+                <div className="border-t pt-3 space-y-2">
+                  <Label className="font-semibold">Subscription Plan (Live Pricing)</Label>
+                  <Select value={selectedPlanId} onValueChange={setSelectedPlanId}>
+                    <SelectTrigger><SelectValue placeholder="Select a plan (optional — overrides above)" /></SelectTrigger>
+                    <SelectContent>
+                      {plans.map(p => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.name} · {p.durationMonths}mo · ₹{p.price}
+                          {p.offerName && ` · ${p.offerName}`}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {selectedPlan && (
+                    <div className="bg-orange-50 p-3 rounded-lg border border-orange-200 space-y-2">
+                      <div className="text-sm flex items-center justify-between">
+                        <span className="text-slate-600">Base price:</span>
+                        <span className="font-mono">₹{(selectedPlan.price || 0).toLocaleString()}</span>
+                      </div>
+                      {selectedPlan.discountPct > 0 && (
+                        <div className="text-sm flex items-center justify-between text-amber-700">
+                          <span>{selectedPlan.offerName || 'Offer'}: {selectedPlan.discountPct}% off</span>
+                          <span className="font-mono">-₹{Math.round(selectedPlan.price * selectedPlan.discountPct / 100).toLocaleString()}</span>
+                        </div>
+                      )}
+                      {selectedPlan.discountFlat > 0 && (
+                        <div className="text-sm flex items-center justify-between text-amber-700">
+                          <span>Flat discount:</span>
+                          <span className="font-mono">-₹{selectedPlan.discountFlat.toLocaleString()}</span>
+                        </div>
+                      )}
+                      <div className="flex items-center gap-2">
+                        <Label className="text-xs whitespace-nowrap">Extra discount ₹</Label>
+                        <Input type="number" min="0" className="h-8" value={customDiscount} onChange={e => setCustomDiscount(e.target.value)} />
+                      </div>
+                      <div className="border-t border-orange-300 pt-2 flex items-center justify-between font-bold text-base">
+                        <span>Final Amount:</span>
+                        <span className="text-orange-700">₹{finalPrice.toLocaleString()}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
               <DialogFooter><Button type="submit" disabled={saving} className="bg-orange-600 hover:bg-orange-700">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Add Member'}</Button></DialogFooter>
             </form>
           </DialogContent>

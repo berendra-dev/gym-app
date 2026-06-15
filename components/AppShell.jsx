@@ -10,6 +10,8 @@ import { Dumbbell, LogOut, Loader2, Wifi, WifiOff } from 'lucide-react'
 const NAV = {
   super_admin: [
     { href: '/super-admin', label: 'Gyms' },
+    { href: '/super-admin/plans', label: 'Plans' },
+    { href: '/super-admin/users', label: 'Users' },
     { href: '/audit-logs', label: 'Audit Logs' },
   ],
   gym_owner: [
