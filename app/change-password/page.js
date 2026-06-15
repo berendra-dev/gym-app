@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { updatePassword } from 'firebase/auth'
-import { doc, updateDoc, serverTimestamp } from 'firebase/firestore'
+import { doc, updateDoc, getDoc, serverTimestamp } from 'firebase/firestore'
 import { auth, db } from '@/lib/firebase/client'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/ui/button'
@@ -13,9 +13,17 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { toast } from 'sonner'
 import { KeyRound, Loader2 } from 'lucide-react'
 
+const ROLE_REDIRECT = {
+  super_admin: '/super-admin',
+  gym_owner:   '/owner',
+  receptionist:'/receptionist',
+  trainer:     '/trainer',
+  student:     '/student',
+}
+
 export default function ChangePasswordPage() {
   const router = useRouter()
-  const { user, profile } = useAuth()
+  const { user } = useAuth()
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
   const [loading, setLoading] = useState(false)
@@ -31,8 +39,14 @@ export default function ChangePasswordPage() {
         mustChangePassword: false,
         passwordChangedAt: serverTimestamp(),
       })
+      // Fetch FRESH profile from server to avoid stale cache redirect loop
+      const snap = await getDoc(doc(db, 'users', user.uid))
+      const data = snap.exists() ? snap.data() : null
+      const target = data?.role ? (ROLE_REDIRECT[data.role] || '/dashboard') : '/dashboard'
       toast.success('Password updated')
-      router.push('/dashboard')
+      // Force-refresh token so custom claims propagate
+      try { await auth.currentUser.getIdToken(true) } catch (e) {}
+      router.replace(target)
     } catch (err) {
       toast.error(err.message || 'Failed to update password')
     } finally { setLoading(false) }
