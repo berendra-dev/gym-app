@@ -206,5 +206,23 @@ agent_communication:
       (6) Analytics, Owner dashboard, Receptionist dashboard, Student page, Reports — all migrated to api.listAttendance (no direct Firestore reads on attendance).
       (7) Backup tool updated to listCollections() under attendance/{gymId} and read each member subcollection.
       (8) lib/api.js gained markAttendance / listAttendance / clearAttendance helpers.
-      Smoke-tested via curl: 401 no-auth manual, 400 missing fields, 404 unknown member, 401 GET without token, public checkin route still functions.
-      All routes compile, lint clean. Old flat attendance/{gymId_memberId_date} docs from prior writes are NOT migrated automatically; new system reads only from nested path.
+      Backend tester confirmed: all validation branches, auth gates, nested path writes, audit logs, public checkin via unified backend, GET/DELETE all working. Manual expired-member test pending user verification.
+  - agent: "main"
+    message: |
+      ID CONSISTENCY REFACTOR — Firestore document ID is now the single source of truth for memberId.
+      (1) /app/app/gym-owner/members/page.js — Replaced uuidv4() with `doc(collection(db, 'members'))` to pre-allocate
+          a Firestore auto-id. The `id` field mirrors `memberRef.id`. No more uuidv4 imports for member creation.
+      (2) /app/app/gym-owner/admissions/page.js — Removed addDoc() for members. Approval flow now:
+          (a) doc(collection(db, 'members')) → ref.id IS the memberId
+          (b) setDoc(memberRef, {id: memberRef.id, ...})
+          (c) writes auditLog entry action='admission.approve'
+          (d) deleteDoc(admissionRequest) to remove the source pending row — prevents duplicates.
+          Member doc now also carries `renewalDate` mirroring expiryDate for the unified attendance API.
+      (3) /app/app/api/[[...path]]/route.js (public admission) — Removed pre-generated uuidv4() memberId.
+          Admission requests now use Firestore auto-id (adminDb.collection('admissionRequests').doc()).
+          Photo storage path is `${gymId}/admissionRequests/${requestId}/profile.{ext}`. Response returns `{ok, requestId}`.
+          No memberId is allocated until approval — eliminates the dual-ID problem entirely.
+      Invariant: For every member, member.id === firestoreDocId. QR encodes member.id (==docId). Attendance API
+      looks up by adminDb.collection('members').doc(memberId) — guaranteed consistent.
+      Smoke-tested: POST /api/public/admission now returns Firestore-generated requestId (e.g. "Zh3yaJujtvZaD3rSUFUo").
+      Lint clean across all touched files.

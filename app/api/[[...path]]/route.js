@@ -153,7 +153,12 @@ async function handle(request, { params }) {
         if (!gymId || !name || !phone) return withCORS(NextResponse.json({ error: 'gymId, name, phone required' }, { status: 400 }))
         const gymDoc = await adminDb.collection('gyms').doc(gymId).get()
         if (!gymDoc.exists || gymDoc.data().status !== 'active') return withCORS(NextResponse.json({ error: 'gym not found or inactive' }, { status: 404 }))
-        const memberId = uuidv4()
+
+        // Pre-allocate Firestore doc ref so we can use its auto-id for the photo storage path,
+        // BEFORE creating the actual member doc. The member doc is only created at approval time.
+        const reqRef = adminDb.collection('admissionRequests').doc()
+        const requestId = reqRef.id
+
         let photoURL = null
         if (photoBase64) {
           try {
@@ -164,7 +169,7 @@ async function handle(request, { params }) {
               const contentType = m[1]
               const buf = Buffer.from(m[2], 'base64')
               const ext = contentType.split('/')[1].replace('+xml', '')
-              const filePath = `${gymId}/members/${memberId}/profile.${ext === 'jpeg' ? 'jpg' : ext}`
+              const filePath = `${gymId}/admissionRequests/${requestId}/profile.${ext === 'jpeg' ? 'jpg' : ext}`
               const file = bucket.file(filePath)
               await file.save(buf, { metadata: { contentType }, public: true })
               photoURL = `https://storage.googleapis.com/${bucket.name}/${filePath}`
@@ -174,8 +179,10 @@ async function handle(request, { params }) {
         const planMonths = plan === 'yearly' ? 12 : plan === 'halfyearly' ? 6 : plan === 'quarterly' ? 3 : 1
         const joinDate = new Date()
         const expiryDate = new Date(joinDate); expiryDate.setMonth(expiryDate.getMonth() + planMonths)
-        await adminDb.collection('admissionRequests').add({
-          id: memberId, gymId,
+        // Admission request: no pre-generated memberId is stored. The actual memberId is
+        // derived at approval time from the Firestore document id of the new `members` doc.
+        await reqRef.set({
+          id: requestId, gymId,
           name, phone, email, gender, plan,
           joinDate: joinDate.toISOString().slice(0, 10),
           expiryDate: expiryDate.toISOString().slice(0, 10),
@@ -184,7 +191,8 @@ async function handle(request, { params }) {
           source: 'qr_public',
           createdAt: new Date(),
         })
-        return withCORS(NextResponse.json({ ok: true, memberId }))
+        console.log('[admission.public] created →', { requestId, gymId, name })
+        return withCORS(NextResponse.json({ ok: true, requestId }))
       }
 
       return withCORS(NextResponse.json({ error: `public route not found: ${route}` }, { status: 404 }))

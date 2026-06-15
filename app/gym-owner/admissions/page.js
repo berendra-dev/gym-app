@@ -2,7 +2,7 @@
 
 import AppShell from '@/components/AppShell'
 import { useEffect, useState } from 'react'
-import { collection, query, where, getDocs, doc, addDoc, deleteDoc, updateDoc, serverTimestamp } from 'firebase/firestore'
+import { collection, query, where, getDocs, doc, setDoc, deleteDoc, updateDoc, serverTimestamp, addDoc } from 'firebase/firestore'
 import { db } from '@/lib/firebase/client'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/ui/button'
@@ -10,7 +10,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
 import { Loader2, Check, X, Phone, Mail } from 'lucide-react'
-import { v4 as uuidv4 } from 'uuid'
 
 function Page() {
   const { profile } = useAuth()
@@ -21,7 +20,11 @@ function Page() {
   const refresh = async () => {
     if (!profile?.gymId) return
     setLoading(true)
-    const snap = await getDocs(query(collection(db, 'admissionRequests'), where('gymId', '==', profile.gymId), where('status', '==', 'pending')))
+    const snap = await getDocs(query(
+      collection(db, 'admissionRequests'),
+      where('gymId', '==', profile.gymId),
+      where('status', '==', 'pending'),
+    ))
     setRequests(snap.docs.map(d => ({ id: d.id, ...d.data() })))
     setLoading(false)
   }
@@ -30,26 +33,67 @@ function Page() {
   const approve = async (req) => {
     setBusy(req.id)
     try {
-      const memberId = req.id || uuidv4()
-      await addDoc(collection(db, 'members'), {
-        id: memberId, gymId: req.gymId,
-        name: req.name, phone: req.phone, email: req.email || '',
-        gender: req.gender, plan: req.plan,
-        joinDate: req.joinDate, expiryDate: req.expiryDate,
+      // SINGLE SOURCE OF TRUTH FOR MEMBER IDENTITY:
+      // 1) Generate a Firestore doc reference — the auto-id IS the memberId.
+      // 2) Mirror that id into the `id` field so reads stay consistent.
+      // 3) After successful creation, DELETE the admission request to avoid duplicates.
+      const memberRef = doc(collection(db, 'members'))
+      const memberId = memberRef.id
+      console.log('[admission.approve] →', { admissionReqId: req.id, newMemberId: memberId })
+
+      await setDoc(memberRef, {
+        id: memberId,
+        gymId: req.gymId,
+        name: req.name,
+        phone: req.phone,
+        email: req.email || '',
+        gender: req.gender,
+        plan: req.plan,
+        joinDate: req.joinDate,
+        expiryDate: req.expiryDate,
+        renewalDate: req.expiryDate,
         photoURL: req.photoURL || null,
         status: 'active',
         source: 'qr_admission',
-        createdAt: serverTimestamp(), createdBy: profile.uid,
+        admittedFromRequestId: req.id,
+        createdAt: serverTimestamp(),
+        createdBy: profile.uid,
       })
-      await updateDoc(doc(db, 'admissionRequests', req.id), { status: 'approved', approvedBy: profile.uid, approvedAt: serverTimestamp() })
+
+      // Audit log first, then delete the request
+      await addDoc(collection(db, 'auditLogs'), {
+        gymId: req.gymId,
+        action: 'admission.approve',
+        targetType: 'member',
+        targetId: memberId,
+        performedBy: profile.uid,
+        performedByRole: profile.role,
+        performedByName: profile.displayName || null,
+        before: { admissionReqId: req.id, status: 'pending' },
+        after: { memberId, status: 'active' },
+        timestamp: serverTimestamp(),
+      })
+
+      // Delete the admission request — prevents the duplicate "ghost" record
+      await deleteDoc(doc(db, 'admissionRequests', req.id))
+
       toast.success(`${req.name} added as a member`)
       refresh()
-    } catch (e) { toast.error(e.message) } finally { setBusy(null) }
+    } catch (e) {
+      toast.error(e.message)
+    } finally { setBusy(null) }
   }
+
   const reject = async (req) => {
     if (!confirm(`Reject ${req.name}'s application?`)) return
-    await updateDoc(doc(db, 'admissionRequests', req.id), { status: 'rejected', rejectedBy: profile.uid, rejectedAt: serverTimestamp() })
-    toast.success('Rejected'); refresh()
+    try {
+      // For rejections we KEEP the request (status='rejected') for audit trail.
+      await updateDoc(doc(db, 'admissionRequests', req.id), {
+        status: 'rejected', rejectedBy: profile.uid, rejectedAt: serverTimestamp(),
+      })
+      toast.success('Rejected')
+      refresh()
+    } catch (e) { toast.error(e.message) }
   }
 
   if (loading) return <div className="py-20 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-orange-600" /></div>
@@ -70,7 +114,9 @@ function Page() {
               {r.email && <div className="flex items-center gap-1"><Mail className="w-3 h-3" />{r.email}</div>}
               <div className="text-slate-500">Wants to join from {r.joinDate} → {r.expiryDate}</div>
               <div className="flex gap-2 pt-3">
-                <Button size="sm" disabled={busy === r.id} className="bg-emerald-600 hover:bg-emerald-700 flex-1" onClick={() => approve(r)}>{busy === r.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <><Check className="w-3 h-3 mr-1" />Approve</>}</Button>
+                <Button size="sm" disabled={busy === r.id} className="bg-emerald-600 hover:bg-emerald-700 flex-1" onClick={() => approve(r)}>
+                  {busy === r.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <><Check className="w-3 h-3 mr-1" />Approve</>}
+                </Button>
                 <Button size="sm" variant="outline" className="text-red-600" onClick={() => reject(r)}><X className="w-3 h-3 mr-1" />Reject</Button>
               </div>
             </CardContent>

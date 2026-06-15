@@ -16,7 +16,6 @@ import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
 import { Plus, Loader2, Trash2, Phone, Calendar, KeyRound, Copy, QrCode } from 'lucide-react'
 import MemberQRDialog from '@/components/MemberQRDialog'
-import { v4 as uuidv4 } from 'uuid'
 
 function Page() {
   const { profile } = useAuth()
@@ -83,7 +82,13 @@ function Page() {
     e.preventDefault()
     setSaving(true)
     try {
-      const id = uuidv4()
+      // SINGLE SOURCE OF TRUTH FOR MEMBER IDENTITY:
+      //   Firestore generates the document ID. We mirror it into the `id` field
+      //   so any code that reads `member.id` gets the SAME value as the doc ID.
+      //   No uuidv4, no addDoc — `doc(collection(...))` returns a ref with an
+      //   auto-generated ID before any write happens.
+      const memberRef = doc(collection(db, 'members'))
+      const id = memberRef.id
       let appliedPlan = plan
       let computedExpiry = expiryDate
       let priceInfo = null
@@ -100,11 +105,11 @@ function Page() {
           finalPrice,
         }
       }
-      // setDoc with explicit id ensures Firestore doc id === member id (fixes delete + lookups)
-      await setDoc(doc(db, 'members', id), {
+      console.log('[member.create] firestoreDocId →', id)
+      await setDoc(memberRef, {
         id, gymId: profile.gymId,
         name, phone, email, gender, plan: appliedPlan,
-        joinDate, expiryDate: computedExpiry,
+        joinDate, expiryDate: computedExpiry, renewalDate: computedExpiry,
         status: 'active',
         pricing: priceInfo,
         createdAt: serverTimestamp(), createdBy: profile.uid,
