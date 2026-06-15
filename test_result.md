@@ -192,3 +192,19 @@ agent_communication:
           with internal gates (delete=gym_owner only). Receptionist nav has NO revenue, analytics, profile,
           trainers, receptionists, audit, backups.
       All pages compile 200 OK, lint clean.
+  - agent: "main"
+    message: |
+      MAJOR REFACTOR: Unified attendance API.
+      (1) NEW /app/app/api/attendance/route.js — single source of truth for ALL attendance ops.
+          POST: mark attendance (via=qr public, via=manual requires Bearer token + role gym_owner/receptionist/super_admin matching gymId).
+          GET: list attendance with optional memberId/from/to (server iterates nested subcollections).
+          DELETE: clear a mark (audit logged).
+      (2) Firestore path is now nested: attendance/{gymId}/{memberId}/{date} with fields {gymId, memberId, memberName, date, status, via, timestamp, markedBy, markedByRole}.
+      (3) Validation: all required fields, member exists, member.gymId match, expiry check via member.renewalDate || member.expiryDate. Expired returns 403 + code='MEMBERSHIP_EXPIRED'.
+      (4) /api/public/checkin no longer writes directly to Firestore — imports and calls recordAttendance({via:'qr'}).
+      (5) Manual attendance page now POSTs to /api/attendance via lib/api.markAttendance.
+      (6) Analytics, Owner dashboard, Receptionist dashboard, Student page, Reports — all migrated to api.listAttendance (no direct Firestore reads on attendance).
+      (7) Backup tool updated to listCollections() under attendance/{gymId} and read each member subcollection.
+      (8) lib/api.js gained markAttendance / listAttendance / clearAttendance helpers.
+      Smoke-tested via curl: 401 no-auth manual, 400 missing fields, 404 unknown member, 401 GET without token, public checkin route still functions.
+      All routes compile, lint clean. Old flat attendance/{gymId_memberId_date} docs from prior writes are NOT migrated automatically; new system reads only from nested path.

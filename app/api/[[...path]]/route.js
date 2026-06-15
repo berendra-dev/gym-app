@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { adminAuth, adminDb, adminMessaging } from '@/lib/firebase/admin'
 import { v4 as uuidv4 } from 'uuid'
+import { recordAttendance } from '@/app/api/attendance/route'
 
 // CORS
 function withCORS(res) {
@@ -103,38 +104,46 @@ async function handle(request, { params }) {
       }
 
       // POST /api/public/checkin  body: { gymId, phone? OR memberId? }
+      //   Delegates to the UNIFIED attendance recorder. No direct Firestore writes here.
       if (route === '/public/checkin' && method === 'POST') {
         const { gymId, phone, memberId } = await request.json()
         if (!gymId || (!phone && !memberId)) return withCORS(NextResponse.json({ error: 'gymId and (phone or memberId) required' }, { status: 400 }))
         const gymDoc = await adminDb.collection('gyms').doc(gymId).get()
         if (!gymDoc.exists || gymDoc.data().status !== 'active') return withCORS(NextResponse.json({ error: 'gym not found or inactive' }, { status: 404 }))
-        // Look up member by memberId (preferred) or phone
-        let memSnap
+
+        // Resolve member by memberId (preferred) or phone
+        let resolvedMember = null
         if (memberId) {
-          memSnap = await adminDb.collection('members').where('gymId', '==', gymId).where('id', '==', memberId).limit(1).get()
-        } else {
-          memSnap = await adminDb.collection('members').where('gymId', '==', gymId).where('phone', '==', phone).limit(1).get()
+          const direct = await adminDb.collection('members').doc(memberId).get()
+          if (direct.exists && direct.data().gymId === gymId) resolvedMember = direct.data()
         }
-        if (memSnap.empty) return withCORS(NextResponse.json({ ok: false, message: 'No member found.' }))
-        const member = memSnap.docs[0].data()
+        if (!resolvedMember) {
+          const field = memberId ? 'id' : 'phone'
+          const value = memberId || phone
+          const memSnap = await adminDb.collection('members').where('gymId', '==', gymId).where(field, '==', value).limit(1).get()
+          if (!memSnap.empty) resolvedMember = memSnap.docs[0].data()
+        }
+        if (!resolvedMember) return withCORS(NextResponse.json({ ok: false, message: 'No member found.' }))
+
         const today = new Date().toISOString().slice(0, 10)
-        if (member.expiryDate && member.expiryDate < today) {
-          return withCORS(NextResponse.json({ ok: false, message: `Membership expired on ${member.expiryDate}. Please renew at reception.`, name: member.name }))
+        try {
+          const result = await recordAttendance({
+            gymId, memberId: resolvedMember.id, date: today, via: 'qr',
+          })
+          const msg = result.duplicate
+            ? `Already checked in today, ${result.memberName}!`
+            : `Welcome ${result.memberName}! Check-in successful.`
+          return withCORS(NextResponse.json({ ok: true, dupe: result.duplicate, message: msg, name: result.memberName, docPath: result.docPath }))
+        } catch (e) {
+          if (e.code === 'MEMBERSHIP_EXPIRED') {
+            return withCORS(NextResponse.json({
+              ok: false, code: 'MEMBERSHIP_EXPIRED',
+              message: `Membership expired${e.expiryDate ? ` on ${e.expiryDate}` : ''}. Please renew at reception.`,
+              name: e.memberName, expiryDate: e.expiryDate,
+            }))
+          }
+          return withCORS(NextResponse.json({ ok: false, message: e.message }, { status: 400 }))
         }
-        const docId = `${gymId}_${member.id}_${today}`
-        console.log('[checkin.public] target →',
-          { gymId, memberId: member.id, memberName: member.name, date: today, docId, viaPhone: !!phone })
-        const existing = await adminDb.collection('attendance').doc(docId).get()
-        if (existing.exists && existing.data().status === 'present') {
-          return withCORS(NextResponse.json({ ok: true, dupe: true, message: `Already checked in today, ${member.name}!`, name: member.name }))
-        }
-        await adminDb.collection('attendance').doc(docId).set({
-          gymId, memberId: member.id, memberName: member.name,
-          date: today, status: 'present',
-          markedBy: 'qr_self_checkin', markedByRole: 'student',
-          markedAt: new Date(), manual: false,
-        })
-        return withCORS(NextResponse.json({ ok: true, message: `Welcome ${member.name}! Check-in successful.`, name: member.name }))
       }
 
       // POST /api/public/admission  body: { gymId, name, phone, email?, gender, plan, photoBase64? }
@@ -324,7 +333,7 @@ async function handle(request, { params }) {
         const { gymId } = body
         if (!gymId) return withCORS(NextResponse.json({ error: 'gymId required' }, { status: 400 }))
         if (caller.profile?.role !== 'super_admin' && caller.profile?.gymId !== gymId) return withCORS(NextResponse.json({ error: 'forbidden' }, { status: 403 }))
-        const collections = ['gyms', 'users', 'members', 'attendance', 'payments', 'admissionRequests', 'announcements', 'auditLogs', 'subscriptionHistory', 'memberVersions']
+        const collections = ['gyms', 'users', 'members', 'payments', 'admissionRequests', 'announcements', 'auditLogs', 'subscriptionHistory', 'memberVersions']
         const backup = { gymId, createdAt: new Date().toISOString(), data: {} }
         for (const col of collections) {
           if (col === 'gyms') {
@@ -335,6 +344,16 @@ async function handle(request, { params }) {
             backup.data[col] = snap.docs.map(d => ({ _id: d.id, ...d.data() }))
           }
         }
+        // Attendance lives in nested subcollections: attendance/{gymId}/{memberId}/{date}
+        backup.data.attendance = []
+        try {
+          const gymAttRef = adminDb.collection('attendance').doc(gymId)
+          const memberSubs = await gymAttRef.listCollections()
+          for (const sub of memberSubs) {
+            const snap = await sub.get()
+            snap.docs.forEach(d => backup.data.attendance.push({ _id: d.id, _memberId: sub.id, ...d.data() }))
+          }
+        } catch (e) { console.warn('[backup] attendance iterate failed:', e.message) }
         const id = uuidv4()
         await adminDb.collection('backups').doc(id).set({
           id, gymId, createdAt: new Date(),

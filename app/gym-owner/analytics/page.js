@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { collection, query, where, getDocs } from 'firebase/firestore'
 import { db } from '@/lib/firebase/client'
 import { useAuth } from '@/contexts/AuthContext'
+import { api } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -12,7 +13,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toast } from 'sonner'
-import { Loader2, BarChart3, Activity, UserCheck, UserX, RefreshCcw, TrendingUp, Calendar } from 'lucide-react'
+import { Loader2, BarChart3, Activity, UserCheck, RefreshCcw, TrendingUp, Calendar } from 'lucide-react'
 
 function Page() {
   const { profile } = useAuth()
@@ -29,21 +30,15 @@ function Page() {
     if (!profile?.gymId) return
     setLoading(true)
     try {
-      const [memSnap, attSnap] = await Promise.all([
-        getDocs(query(collection(db, 'members'), where('gymId', '==', profile.gymId))),
-        getDocs(query(
-          collection(db, 'attendance'),
-          where('gymId', '==', profile.gymId),
-          where('date', '>=', from),
-          where('date', '<=', to),
-        )),
-      ])
+      const memSnap = await getDocs(query(collection(db, 'members'), where('gymId', '==', profile.gymId)))
       setMembers(memSnap.docs.map(d => ({ id: d.id, ...d.data() })))
-      setAttendance(attSnap.docs.map(d => ({ id: d.id, ...d.data() })))
+      // Unified API — server-side aggregation over nested subcollections
+      const r = await api.listAttendance({ gymId: profile.gymId, from, to })
+      setAttendance(r.records || [])
     } catch (e) { toast.error(e.message) }
     setLoading(false)
   }
-  useEffect(() => { load() }, [profile, from, to])
+  useEffect(() => { load() }, [profile, from, to]) // eslint-disable-line
 
   const stats = useMemo(() => {
     const present = attendance.filter(a => a.status === 'present')

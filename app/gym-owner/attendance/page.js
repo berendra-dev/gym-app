@@ -2,28 +2,28 @@
 
 import AppShell from '@/components/AppShell'
 import { useEffect, useState, useMemo } from 'react'
-import { collection, query, where, getDocs, setDoc, doc, serverTimestamp, deleteDoc } from 'firebase/firestore'
+import { collection, query, where, getDocs } from 'firebase/firestore'
 import { db } from '@/lib/firebase/client'
 import { useAuth } from '@/contexts/AuthContext'
+import { api } from '@/lib/api'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { toast } from 'sonner'
-import { Loader2, ChevronLeft, ChevronRight, Check, X, Minus } from 'lucide-react'
+import { Loader2, ChevronLeft, ChevronRight, Check, X, Minus, AlertTriangle } from 'lucide-react'
 
 function Page() {
   const { profile } = useAuth()
   const [members, setMembers] = useState([])
   const [selectedMemberId, setSelectedMemberId] = useState('')
-  const [attendance, setAttendance] = useState({}) // { 'YYYY-MM-DD': {status, ...} }
+  const [attendance, setAttendance] = useState({})  // { 'YYYY-MM-DD': {...} }
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [cursor, setCursor] = useState(() => { const d = new Date(); d.setDate(1); return d })
-  const [manualDialog, setManualDialog] = useState(null) // { date, currentStatus }
+  const [manualDialog, setManualDialog] = useState(null)
   const [manualStatus, setManualStatus] = useState('present')
   const [manualReason, setManualReason] = useState('')
 
@@ -40,24 +40,19 @@ function Page() {
     })()
   }, [profile])
 
-  // Load attendance for selected member + visible month
-  useEffect(() => {
+  // Load attendance for selected member via the UNIFIED API
+  const loadAttendance = async () => {
     if (!profile?.gymId || !selectedMemberId) return
-    (async () => {
+    try {
       const start = new Date(cursor.getFullYear(), cursor.getMonth(), 1).toISOString().slice(0, 10)
       const end = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0).toISOString().slice(0, 10)
-      const snap = await getDocs(query(
-        collection(db, 'attendance'),
-        where('gymId', '==', profile.gymId),
-        where('memberId', '==', selectedMemberId),
-        where('date', '>=', start),
-        where('date', '<=', end),
-      ))
+      const r = await api.listAttendance({ gymId: profile.gymId, memberId: selectedMemberId, from: start, to: end })
       const map = {}
-      snap.docs.forEach(d => { const data = d.data(); map[data.date] = { ...data, _docId: d.id } })
+      ;(r.records || []).forEach(d => { map[d.date] = d })
       setAttendance(map)
-    })()
-  }, [profile, selectedMemberId, cursor])
+    } catch (e) { toast.error(e.message) }
+  }
+  useEffect(() => { loadAttendance() }, [profile, selectedMemberId, cursor]) // eslint-disable-line
 
   const days = useMemo(() => {
     const year = cursor.getFullYear(), month = cursor.getMonth()
@@ -85,79 +80,57 @@ function Page() {
 
   const submitManual = async () => {
     if (!manualDialog || !selectedMember) return
-    // Renewal restriction: block attendance for expired memberships
-    const dateStr = manualDialog.date
-    if (selectedMember.expiryDate && dateStr > selectedMember.expiryDate) {
-      toast.error(`Cannot mark attendance — membership expired on ${selectedMember.expiryDate}. Please renew first.`)
-      return
-    }
-    if (selectedMember.status === 'inactive') {
-      toast.error('Cannot mark attendance — member is inactive.')
-      return
-    }
     setBusy(true)
     try {
-      // Doc id uniquely identifies THIS member on THIS date — cannot affect other members
-      const docId = `${profile.gymId}_${selectedMember.id}_${dateStr}`
-      console.log('[attendance.manual] target →',
-        { gymId: profile.gymId, memberId: selectedMember.id, memberName: selectedMember.name, date: dateStr, docId, status: manualStatus })
-      await setDoc(doc(db, 'attendance', docId), {
+      console.log('[attendance.manual] dispatch →', {
+        gymId: profile.gymId, memberId: selectedMember.id, memberName: selectedMember.name,
+        date: manualDialog.date, status: manualStatus, via: 'manual',
+      })
+      const result = await api.markAttendance({
         gymId: profile.gymId,
         memberId: selectedMember.id,
-        memberName: selectedMember.name,
-        date: dateStr,
+        date: manualDialog.date,
+        via: 'manual',
         status: manualStatus,
-        markedBy: profile.uid,
-        markedByRole: profile.role,
-        markedByName: profile.displayName,
-        markedAt: serverTimestamp(),
-        manual: true,
-        reason: manualReason || null,
-        previousStatus: manualDialog.currentStatus || null,
+        reason: manualReason || undefined,
       })
-      // Audit log
-      await setDoc(doc(collection(db, 'auditLogs')), {
-        gymId: profile.gymId,
-        action: 'attendance.manual',
-        targetType: 'attendance',
-        targetId: docId,
-        performedBy: profile.uid,
-        performedByRole: profile.role,
-        performedByName: profile.displayName,
-        before: manualDialog.currentStatus ? { status: manualDialog.currentStatus } : null,
-        after: { status: manualStatus },
-        reason: manualReason || null,
-        timestamp: serverTimestamp(),
-      })
-      // refresh attendance map
-      setAttendance(prev => ({ ...prev, [dateStr]: { ...(prev[dateStr] || {}), status: manualStatus, _docId: docId } }))
-      toast.success(`Marked ${manualStatus}`)
+      setAttendance(prev => ({
+        ...prev,
+        [manualDialog.date]: {
+          ...(prev[manualDialog.date] || {}),
+          status: manualStatus, date: manualDialog.date, via: 'manual',
+          memberId: selectedMember.id, memberName: selectedMember.name,
+        },
+      }))
+      toast.success(`${result.duplicate ? 'Updated' : 'Marked'} ${manualStatus}`)
       setManualDialog(null)
     } catch (e) {
-      toast.error(e.message)
+      // Surface MEMBERSHIP EXPIRED specifically
+      const msg = e.message || 'Failed to mark attendance'
+      toast.error(msg.includes('EXPIRED') ? '❌ MEMBERSHIP EXPIRED — renew before marking attendance.' : msg)
     } finally { setBusy(false) }
   }
 
   const clearMark = async (dateStr) => {
-    const existing = attendance[dateStr]
-    if (!existing?._docId) return
     if (!confirm('Clear this attendance mark?')) return
-    console.log('[attendance.clear] target →',
-      { gymId: profile.gymId, memberId: selectedMember?.id, memberName: selectedMember?.name, date: dateStr, docId: existing._docId })
-    await deleteDoc(doc(db, 'attendance', existing._docId))
-    setAttendance(prev => { const c = { ...prev }; delete c[dateStr]; return c })
-    toast.success('Cleared')
+    try {
+      console.log('[attendance.clear] dispatch →', { gymId: profile.gymId, memberId: selectedMember.id, date: dateStr })
+      await api.clearAttendance({ gymId: profile.gymId, memberId: selectedMember.id, date: dateStr })
+      setAttendance(prev => { const c = { ...prev }; delete c[dateStr]; return c })
+      toast.success('Cleared')
+    } catch (e) { toast.error(e.message) }
   }
 
   if (loading) return <div className="py-20 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-orange-600" /></div>
 
   const monthLabel = cursor.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+  const memberExpired = selectedMember?.expiryDate && selectedMember.expiryDate < todayStr
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Attendance Calendar</h1>
-        <p className="text-slate-500 mt-1">Server-timestamped • Green = Present, Red = Absent, Grey = Not marked</p>
+        <p className="text-slate-500 mt-1">Unified API · path: <span className="font-mono text-xs">attendance/{'{gymId}'}/{'{memberId}'}/{'{date}'}</span></p>
       </div>
 
       <Card>
@@ -180,6 +153,13 @@ function Page() {
           </div>
         </CardHeader>
         <CardContent>
+          {memberExpired && (
+            <div className="mb-4 rounded-lg border border-red-300 bg-red-50 p-3 flex items-center gap-2 text-red-800 text-sm">
+              <AlertTriangle className="w-4 h-4" />
+              <strong>Membership expired on {selectedMember.expiryDate}.</strong>
+              <span>Attendance is blocked by the API until renewal.</span>
+            </div>
+          )}
           {!selectedMember ? <p className="text-slate-500 text-center py-12">Add members first to mark attendance.</p> : (
             <div className="grid grid-cols-7 gap-2">
               {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => <div key={d} className="text-center text-xs font-medium text-slate-500 py-2">{d}</div>)}

@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore'
 import { db } from '@/lib/firebase/client'
 import { useAuth } from '@/contexts/AuthContext'
+import { api } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -50,11 +51,12 @@ function Page() {
     (async () => {
       const start = new Date(cursor.getFullYear(), cursor.getMonth(), 1).toISOString().slice(0, 10)
       const end = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0).toISOString().slice(0, 10)
-      const snap = await getDocs(query(collection(db, 'attendance'),
-        where('gymId', '==', profile.gymId), where('memberId', '==', member.id),
-        where('date', '>=', start), where('date', '<=', end)))
-      const map = {}; snap.forEach(d => { const data = d.data(); map[data.date] = data })
-      setAttendance(map)
+      try {
+        const r = await api.listAttendance({ gymId: profile.gymId, memberId: member.id, from: start, to: end })
+        const map = {}
+        ;(r.records || []).forEach(d => { map[d.date] = d })
+        setAttendance(map)
+      } catch (e) { /* ignore */ }
     })()
   }, [member, cursor, profile])
 

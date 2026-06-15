@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { collection, query, where, getDocs, getDoc, doc } from 'firebase/firestore'
 import { db } from '@/lib/firebase/client'
 import { useAuth } from '@/contexts/AuthContext'
+import { api } from '@/lib/api'
 import Link from 'next/link'
 import PlatformOffersBanner from '@/components/PlatformOffersBanner'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -21,13 +22,13 @@ function Page() {
     if (!profile?.gymId) return
     (async () => {
       const today = new Date().toISOString().slice(0, 10)
-      const [gymSnap, membersSnap, attSnap] = await Promise.all([
+      const [gymSnap, membersSnap, attResp] = await Promise.all([
         getDoc(doc(db, 'gyms', profile.gymId)),
         getDocs(query(collection(db, 'members'), where('gymId', '==', profile.gymId))),
-        getDocs(query(collection(db, 'attendance'), where('gymId', '==', profile.gymId), where('date', '==', today))),
+        api.listAttendance({ gymId: profile.gymId, from: today, to: today }).catch(() => ({ records: [] })),
       ])
       const members = membersSnap.docs.map(d => d.data())
-      const presentToday = attSnap.docs.filter(d => d.data().status === 'present').length
+      const presentToday = (attResp.records || []).filter(d => d.status === 'present').length
       const now = new Date()
       const expired = members.filter(m => m.expiryDate && new Date(m.expiryDate) < now).length
       const newThisMonth = members.filter(m => {

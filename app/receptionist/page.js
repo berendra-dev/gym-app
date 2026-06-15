@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore'
 import { db } from '@/lib/firebase/client'
 import { useAuth } from '@/contexts/AuthContext'
+import { api } from '@/lib/api'
 import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Users, UserCheck, Loader2, Calendar } from 'lucide-react'
@@ -18,15 +19,15 @@ function Page() {
     if (!profile?.gymId) return
     (async () => {
       const today = new Date().toISOString().slice(0, 10)
-      const [gymSnap, membersSnap, attSnap] = await Promise.all([
+      const [gymSnap, membersSnap, attResp] = await Promise.all([
         getDoc(doc(db, 'gyms', profile.gymId)),
         getDocs(query(collection(db, 'members'), where('gymId', '==', profile.gymId))),
-        getDocs(query(collection(db, 'attendance'), where('gymId', '==', profile.gymId), where('date', '==', today))),
+        api.listAttendance({ gymId: profile.gymId, from: today, to: today }).catch(() => ({ records: [] })),
       ])
       setGym(gymSnap.exists() ? gymSnap.data() : null)
       setStats({
         total: membersSnap.size,
-        presentToday: attSnap.docs.filter(d => d.data().status === 'present').length,
+        presentToday: (attResp.records || []).filter(d => d.status === 'present').length,
       })
     })()
   }, [profile])

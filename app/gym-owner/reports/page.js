@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { collection, query, where, getDocs } from 'firebase/firestore'
 import { db } from '@/lib/firebase/client'
 import { useAuth } from '@/contexts/AuthContext'
+import { api } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -47,10 +48,12 @@ function Page() {
   const runAttendance = async (format) => {
     setBusy(true)
     try {
-      const data = await fetch('attendance', 'date', true)
+      // Unified API — server aggregates over nested attendance/{gymId}/{memberId}/{date}
+      const r = await api.listAttendance({ gymId: profile.gymId, from: start, to: end })
+      const data = (r.records || []).filter(d => d.status === 'present' || d.status === 'absent')
       data.sort((a, b) => (b.date || '').localeCompare(a.date || ''))
-      const cols = ['Date', 'Member', 'Status', 'Manual', 'Marked By Role']
-      const rows = data.map(d => [d.date, d.memberName, d.status, d.manual ? 'Yes' : 'No', d.markedByRole || ''])
+      const cols = ['Date', 'Member', 'Status', 'Via', 'Marked By Role']
+      const rows = data.map(d => [d.date, d.memberName, d.status, d.via || (d.manual ? 'manual' : 'qr'), d.markedByRole || ''])
       if (format === 'pdf') exportPDF('Attendance Report', cols, rows, `attendance-${start}-to-${end}.pdf`)
       else exportXLSX('Attendance', cols, rows, `attendance-${start}-to-${end}.xlsx`)
       toast.success(`Exported ${data.length} records`)
