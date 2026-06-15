@@ -11,11 +11,14 @@ const NAV = {
   super_admin: [
     { href: '/super-admin', label: 'Gyms' },
     { href: '/super-admin/plans', label: 'Plans' },
+    { href: '/super-admin/offers', label: 'Offers' },
+    { href: '/super-admin/email-requests', label: 'Email Requests' },
     { href: '/super-admin/users', label: 'Users' },
     { href: '/audit-logs', label: 'Audit Logs' },
   ],
   gym_owner: [
     { href: '/gym-owner', label: 'Dashboard' },
+    { href: '/gym-owner/profile', label: 'Profile' },
     { href: '/gym-owner/members', label: 'Members' },
     { href: '/gym-owner/attendance', label: 'Attendance' },
     { href: '/gym-owner/payments', label: 'Payments' },

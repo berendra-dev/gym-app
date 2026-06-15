@@ -39,7 +39,7 @@ function Page() {
   }
   useEffect(() => { refresh() }, [profile])
 
-  const isPremium = gym?.plan === 'premium'
+  const isPremium = gym?.plan === 'premium' || gym?.plan === 'diamond'
 
   const genPwd = () => {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789abcdefghjkmnpqrstuvwxyz'

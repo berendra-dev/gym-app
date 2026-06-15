@@ -150,7 +150,7 @@ function Page() {
               <div className="grid grid-cols-2 gap-3"><div><Label>Gym Name</Label><Input required value={gymName} onChange={e => setGymName(e.target.value)} /></div><div><Label>Phone</Label><Input value={gymPhone} onChange={e => setGymPhone(e.target.value)} /></div></div>
               <div><Label>Address</Label><Input value={gymAddress} onChange={e => setGymAddress(e.target.value)} /></div>
               <div className="grid grid-cols-2 gap-3"><div><Label>Owner Name</Label><Input required value={ownerName} onChange={e => setOwnerName(e.target.value)} /></div><div><Label>Owner Email</Label><Input required type="email" value={ownerEmail} onChange={e => setOwnerEmail(e.target.value)} /></div></div>
-              <div><Label>Plan</Label><Select value={plan} onValueChange={setPlan}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="basic">Basic</SelectItem><SelectItem value="medium">Medium</SelectItem><SelectItem value="premium">Premium</SelectItem></SelectContent></Select></div>
+              <div><Label>Plan</Label><Select value={plan} onValueChange={setPlan}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="silver">Silver</SelectItem><SelectItem value="gold">Gold</SelectItem><SelectItem value="diamond">Diamond</SelectItem></SelectContent></Select></div>
               <DialogFooter><Button type="submit" disabled={creating} className="bg-orange-600 hover:bg-orange-700">{creating ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Create'}</Button></DialogFooter>
             </form>
           </DialogContent>
@@ -219,7 +219,7 @@ function Page() {
         <DialogContent>
           <DialogHeader><DialogTitle>Subscription Settings</DialogTitle><DialogDescription>{settingsGym?.name}</DialogDescription></DialogHeader>
           <div className="space-y-3">
-            <div><Label>Plan</Label><Select value={sPlan} onValueChange={setSPlan}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="basic">Basic</SelectItem><SelectItem value="medium">Medium</SelectItem><SelectItem value="premium">Premium (Trainers, QR, FCM)</SelectItem></SelectContent></Select></div>
+            <div><Label>Plan</Label><Select value={sPlan} onValueChange={setSPlan}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="silver">Silver</SelectItem><SelectItem value="gold">Gold</SelectItem><SelectItem value="diamond">Diamond (Trainers, QR, FCM)</SelectItem></SelectContent></Select></div>
             <div><Label>Subscription Expiry</Label><Input type="date" value={sExpiry} onChange={e => setSExpiry(e.target.value)} /></div>
             <div className="grid grid-cols-2 gap-3">
               <div><Label>Renewal Mode</Label><Select value={sRenewal} onValueChange={setSRenewal}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="expiry">Expiry-based</SelectItem><SelectItem value="payment">Payment-based</SelectItem></SelectContent></Select></div>

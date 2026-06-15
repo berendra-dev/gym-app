@@ -6,6 +6,7 @@ import { collection, query, where, getDocs, getDoc, doc } from 'firebase/firesto
 import { db } from '@/lib/firebase/client'
 import { useAuth } from '@/contexts/AuthContext'
 import Link from 'next/link'
+import PlatformOffersBanner from '@/components/PlatformOffersBanner'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Users, UserCheck, UserX, CalendarClock, TrendingUp, Building2, Loader2 } from 'lucide-react'
@@ -60,6 +61,7 @@ function Page() {
 
   return (
     <div className="space-y-6">
+      <PlatformOffersBanner />
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3"><Building2 className="w-7 h-7 text-orange-600" />{gym?.name || 'My Gym'}</h1>

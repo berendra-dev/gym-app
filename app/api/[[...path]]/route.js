@@ -405,6 +405,83 @@ async function handle(request, { params }) {
         return withCORS(NextResponse.json({ ok: true }))
       }
 
+      // POST /api/admin/offers/save  body: { id?, title, body, ctaLabel?, ctaUrl?, active }
+      if (route === '/admin/offers/save' && method === 'POST') {
+        if (caller.profile?.role !== 'super_admin') return withCORS(NextResponse.json({ error: 'forbidden' }, { status: 403 }))
+        const body = await request.json()
+        if (!body.title || !body.body) return withCORS(NextResponse.json({ error: 'title and body required' }, { status: 400 }))
+        const id = body.id || uuidv4()
+        await adminDb.collection('platformOffers').doc(id).set({
+          id, title: body.title, body: body.body,
+          ctaLabel: body.ctaLabel || null, ctaUrl: body.ctaUrl || null,
+          active: body.active !== false,
+          updatedAt: new Date(), updatedBy: caller.uid,
+          ...(body.id ? {} : { createdAt: new Date(), createdBy: caller.uid }),
+        }, { merge: true })
+        return withCORS(NextResponse.json({ ok: true, id }))
+      }
+      const offerDelMatch = route.match(/^\/admin\/offers\/([^\/]+)$/)
+      if (offerDelMatch && method === 'DELETE') {
+        if (caller.profile?.role !== 'super_admin') return withCORS(NextResponse.json({ error: 'forbidden' }, { status: 403 }))
+        await adminDb.collection('platformOffers').doc(offerDelMatch[1]).delete()
+        return withCORS(NextResponse.json({ ok: true }))
+      }
+
+      // POST /api/admin/email-change/request  body: { newEmail }   (caller = gym_owner / receptionist / trainer)
+      if (route === '/admin/email-change/request' && method === 'POST') {
+        const { newEmail } = await request.json()
+        if (!newEmail || !/.+@.+\..+/.test(newEmail)) return withCORS(NextResponse.json({ error: 'valid newEmail required' }, { status: 400 }))
+        if (newEmail === caller.email) return withCORS(NextResponse.json({ error: 'New email matches current email' }, { status: 400 }))
+        // Check newEmail not already used
+        try {
+          await adminAuth.getUserByEmail(newEmail)
+          return withCORS(NextResponse.json({ error: 'That email is already in use' }, { status: 409 }))
+        } catch (e) { /* not found = good */ }
+        const reqId = uuidv4()
+        await adminDb.collection('emailChangeRequests').doc(reqId).set({
+          id: reqId, uid: caller.uid, currentEmail: caller.email, newEmail,
+          gymId: caller.profile?.gymId || null,
+          requestedBy: caller.uid, requestedByName: caller.profile?.displayName || caller.email,
+          requestedByRole: caller.profile?.role || null,
+          status: 'pending',
+          createdAt: new Date(),
+        })
+        return withCORS(NextResponse.json({ ok: true, id: reqId }))
+      }
+
+      // POST /api/admin/email-change/approve  body: { id }
+      if (route === '/admin/email-change/approve' && method === 'POST') {
+        if (caller.profile?.role !== 'super_admin') return withCORS(NextResponse.json({ error: 'forbidden' }, { status: 403 }))
+        const { id } = await request.json()
+        const ref = adminDb.collection('emailChangeRequests').doc(id)
+        const snap = await ref.get()
+        if (!snap.exists) return withCORS(NextResponse.json({ error: 'not found' }, { status: 404 }))
+        const r = snap.data()
+        if (r.status !== 'pending') return withCORS(NextResponse.json({ error: 'already processed' }, { status: 400 }))
+        // Update Firebase Auth email (this implicitly deactivates the old email for login)
+        await adminAuth.updateUser(r.uid, { email: r.newEmail, emailVerified: false })
+        await adminAuth.revokeRefreshTokens(r.uid)
+        await adminDb.collection('users').doc(r.uid).update({ email: r.newEmail, mustChangePassword: false })
+        await ref.update({ status: 'approved', approvedAt: new Date(), approvedBy: caller.uid })
+        await adminDb.collection('auditLogs').add({
+          gymId: r.gymId, action: 'email.changed', targetType: 'user', targetId: r.uid,
+          performedBy: caller.uid, performedByRole: 'super_admin',
+          before: { email: r.currentEmail }, after: { email: r.newEmail },
+          timestamp: new Date(),
+        })
+        return withCORS(NextResponse.json({ ok: true, newEmail: r.newEmail }))
+      }
+
+      // POST /api/admin/email-change/reject  body: { id, reason? }
+      if (route === '/admin/email-change/reject' && method === 'POST') {
+        if (caller.profile?.role !== 'super_admin') return withCORS(NextResponse.json({ error: 'forbidden' }, { status: 403 }))
+        const { id, reason } = await request.json()
+        await adminDb.collection('emailChangeRequests').doc(id).update({
+          status: 'rejected', rejectedAt: new Date(), rejectedBy: caller.uid, rejectionReason: reason || null,
+        })
+        return withCORS(NextResponse.json({ ok: true }))
+      }
+
       // POST /api/admin/announcements/send  body: { gymId, title, body, audience: 'all'|'staff'|'members', data? }
       if (route === '/admin/announcements/send' && method === 'POST') {
         const { gymId, title, body, audience = 'all', data } = await request.json()
