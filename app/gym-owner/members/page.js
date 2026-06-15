@@ -14,8 +14,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
-import { Plus, Loader2, Trash2, Phone, Calendar, KeyRound, Copy, QrCode } from 'lucide-react'
+import { Plus, Loader2, Trash2, Phone, Calendar, KeyRound, Copy, QrCode, History } from 'lucide-react'
 import MemberQRDialog from '@/components/MemberQRDialog'
+import Link from 'next/link'
 
 function Page() {
   const { profile } = useAuth()
@@ -114,6 +115,16 @@ function Page() {
         pricing: priceInfo,
         createdAt: serverTimestamp(), createdBy: profile.uid,
       })
+      // Audit: member.create
+      await addDoc(collection(db, 'auditLogs'), {
+        gymId: profile.gymId,
+        action: 'member.create',
+        targetType: 'member', targetId: id,
+        performedBy: profile.uid, performedByRole: profile.role,
+        performedByName: profile.displayName || null,
+        after: { name, phone, email, plan: appliedPlan, joinDate, expiryDate: computedExpiry, pricing: priceInfo },
+        timestamp: serverTimestamp(),
+      })
       toast.success(selectedPlan ? `Member added · ₹${finalPrice} for ${selectedPlan.durationMonths}mo` : 'Member added')
       setName(''); setPhone(''); setEmail(''); setSelectedPlanId(''); setCustomDiscount(0)
       setOpen(false); refresh()
@@ -125,9 +136,18 @@ function Page() {
     if (!confirm(`Permanently delete ${m.name}?`)) return
     try {
       console.log('[member.delete] target →', { gymId: profile.gymId, memberId: m.id, memberName: m.name })
-      // m.id is now guaranteed to match the Firestore doc id (setDoc with explicit id)
+      // Audit log BEFORE deletion so we still have member details
+      await addDoc(collection(db, 'auditLogs'), {
+        gymId: profile.gymId,
+        action: 'member.delete',
+        targetType: 'member', targetId: m.id,
+        performedBy: profile.uid, performedByRole: profile.role,
+        performedByName: profile.displayName || null,
+        before: { name: m.name, phone: m.phone, email: m.email, plan: m.plan, expiryDate: m.expiryDate, status: m.status },
+        timestamp: serverTimestamp(),
+      })
+      // m.id === Firestore doc id (guaranteed by our setDoc / doc(collection) writes)
       await deleteDoc(doc(db, 'members', m.id))
-      // Optimistically remove from UI immediately
       setMembers(prev => prev.filter(x => x.id !== m.id))
       toast.success(`${m.name} deleted`)
       refresh()
@@ -258,6 +278,9 @@ function Page() {
                   </div>
                   <div className="flex gap-1 mt-3 flex-wrap">
                     <Button size="sm" variant="ghost" className="text-orange-600 h-7 px-2" onClick={() => setQrMember(m)}><QrCode className="w-3 h-3 mr-1" />QR</Button>
+                    <Link href={`/gym-owner/members/${m.id}/history`}>
+                      <Button size="sm" variant="ghost" className="text-slate-600 h-7 px-2"><History className="w-3 h-3 mr-1" />History</Button>
+                    </Link>
                     {!isReceptionist && (
                       <>
                         <Button size="sm" variant="ghost" className="text-blue-600 h-7 px-2" onClick={() => createLogin(m)}><KeyRound className="w-3 h-3 mr-1" />Login</Button>

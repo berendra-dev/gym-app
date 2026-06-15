@@ -226,3 +226,15 @@ agent_communication:
       looks up by adminDb.collection('members').doc(memberId) — guaranteed consistent.
       Smoke-tested: POST /api/public/admission now returns Firestore-generated requestId (e.g. "Zh3yaJujtvZaD3rSUFUo").
       Lint clean across all touched files.
+  - agent: "main"
+    message: |
+      P2 (1/4): Per-Member Version History Timeline UI.
+      (1) NEW /app/app/gym-owner/members/[memberId]/history/page.js — vertical timeline of all audit events for a
+          single member. Icon + color coded per action (member.create, admission.approve, payment.renew/reactivate,
+          attendance.manual/clear, cron.auto_expire, etc.). Each event shows actor, timestamp, before→after diff.
+          Read-only, allow=['gym_owner', 'receptionist', 'super_admin'].
+      (2) Added audit log writes for `member.create` and `member.delete` in /app/app/gym-owner/members/page.js
+          (with full before/after snapshots; member.delete logged BEFORE deleteDoc so member name/phone preserved).
+      (3) Added "History" button to each member card on the members list page linking to the new timeline route.
+      All routes compile 200 OK, lint clean. Existing audit-log writers (payments, admissions, attendance, etc.)
+      already use the targetType='member'/targetId=memberId convention so they appear in the timeline automatically.
