@@ -332,19 +332,31 @@ async function handle(request, { params }) {
         })
       }
 
-      // POST /api/admin/users/reset-password  body: { uid }  →  returns new temp password
+      // POST /api/admin/users/reset-password  body: { uid }
+      // Super admin can reset any user. Gym owner can reset only trainer/receptionist in their own gym.
       if (route === '/admin/users/reset-password' && method === 'POST') {
-        if (caller.profile?.role !== 'super_admin') return withCORS(NextResponse.json({ error: 'forbidden' }, { status: 403 }))
         const { uid } = await request.json()
         if (!uid) return withCORS(NextResponse.json({ error: 'uid required' }, { status: 400 }))
+        const callerRole = caller.profile?.role
+        // Fetch target
+        const targetSnap = await adminDb.collection('users').doc(uid).get()
+        if (!targetSnap.exists) return withCORS(NextResponse.json({ error: 'target user not found' }, { status: 404 }))
+        const target = targetSnap.data()
+        let allowed = false
+        if (callerRole === 'super_admin') allowed = true
+        else if (callerRole === 'gym_owner'
+                 && target.gymId === caller.profile.gymId
+                 && ['trainer', 'receptionist'].includes(target.role)) allowed = true
+        if (!allowed) return withCORS(NextResponse.json({ error: 'forbidden' }, { status: 403 }))
         const newPassword = genTempPassword()
+        // Firebase Auth automatically hashes the password using scrypt before storing
         await adminAuth.updateUser(uid, { password: newPassword })
         await adminAuth.revokeRefreshTokens(uid)
         await adminDb.collection('users').doc(uid).update({ mustChangePassword: true })
         await adminDb.collection('auditLogs').add({
-          gymId: null, action: 'password.reset',
+          gymId: target.gymId || null, action: 'password.reset',
           targetType: 'user', targetId: uid,
-          performedBy: caller.uid, performedByRole: 'super_admin',
+          performedBy: caller.uid, performedByRole: callerRole,
           timestamp: new Date(),
         })
         return withCORS(NextResponse.json({ ok: true, password: newPassword }))

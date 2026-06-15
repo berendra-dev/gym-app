@@ -12,7 +12,7 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from '@/components/ui/dialog'
 import { toast } from 'sonner'
-import { Plus, Loader2, Copy, UserCog, Trash2, Mail } from 'lucide-react'
+import { Plus, Loader2, Copy, UserCog, Trash2, Mail, KeyRound } from 'lucide-react'
 
 function Page() {
   const { profile } = useAuth()
@@ -50,6 +50,15 @@ function Page() {
       await api.deleteUser(u.uid)
       toast.success('Receptionist removed')
       refresh()
+    } catch (e) { toast.error(e.message) }
+  }
+
+  const resetPw = async (u) => {
+    if (!confirm(`Reset password for ${u.email}? A new temporary password will be generated.`)) return
+    try {
+      const r = await api.resetPassword(u.uid)
+      setCreds({ name: u.displayName || u.email, email: u.email, password: r.password })
+      toast.success('Password reset · share securely')
     } catch (e) { toast.error(e.message) }
   }
 
@@ -97,6 +106,7 @@ function Page() {
                 <div className="text-xs text-slate-500 flex items-center gap-1 mt-1"><Mail className="w-3 h-3" />{u.email}</div>
                 {u.mustChangePassword && <div className="text-xs text-amber-600 mt-1">Pending first login</div>}
               </div>
+              <Button size="sm" variant="outline" onClick={() => resetPw(u)}><KeyRound className="w-3 h-3 mr-1" />Reset PW</Button>
               <Button size="sm" variant="ghost" className="text-red-600" onClick={() => remove(u)}><Trash2 className="w-4 h-4" /></Button>
             </CardContent>
           </Card>

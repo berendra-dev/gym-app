@@ -2,7 +2,7 @@
 
 import AppShell from '@/components/AppShell'
 import { useEffect, useState } from 'react'
-import { collection, query, where, getDocs, addDoc, serverTimestamp, doc, deleteDoc, onSnapshot } from 'firebase/firestore'
+import { collection, query, where, getDocs, setDoc, addDoc, serverTimestamp, doc, deleteDoc, onSnapshot } from 'firebase/firestore'
 import { db } from '@/lib/firebase/client'
 import { useAuth } from '@/contexts/AuthContext'
 import { api } from '@/lib/api'
@@ -100,7 +100,8 @@ function Page() {
           finalPrice,
         }
       }
-      await addDoc(collection(db, 'members'), {
+      // setDoc with explicit id ensures Firestore doc id === member id (fixes delete + lookups)
+      await setDoc(doc(db, 'members', id), {
         id, gymId: profile.gymId,
         name, phone, email, gender, plan: appliedPlan,
         joinDate, expiryDate: computedExpiry,
@@ -117,8 +118,14 @@ function Page() {
   const handleDelete = async (m) => {
     if (profile.role !== 'gym_owner') { toast.error('Only Gym Owner can delete members'); return }
     if (!confirm(`Permanently delete ${m.name}?`)) return
-    await deleteDoc(doc(db, 'members', m.id))
-    toast.success('Deleted'); refresh()
+    try {
+      // m.id is now guaranteed to match the Firestore doc id (setDoc with explicit id)
+      await deleteDoc(doc(db, 'members', m.id))
+      // Optimistically remove from UI immediately
+      setMembers(prev => prev.filter(x => x.id !== m.id))
+      toast.success(`${m.name} deleted`)
+      refresh()
+    } catch (e) { toast.error('Delete failed: ' + e.message) }
   }
 
   const createLogin = async (m) => {

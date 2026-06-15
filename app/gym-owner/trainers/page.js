@@ -13,7 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from '@/components/ui/dialog'
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
-import { Plus, Loader2, Copy, Crown, UserPlus } from 'lucide-react'
+import { Plus, Loader2, Copy, Crown, UserPlus, KeyRound } from 'lucide-react'
 
 function Page() {
   const { profile } = useAuth()
@@ -107,7 +107,15 @@ function Page() {
         {trainers.map(t => (
           <Card key={t.uid}><CardContent className="pt-4 flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center"><UserPlus className="w-5 h-5 text-orange-600" /></div>
-            <div><div className="font-medium">{t.displayName}</div><div className="text-xs text-slate-500">{t.email}</div></div>
+            <div className="flex-1 min-w-0"><div className="font-medium truncate">{t.displayName}</div><div className="text-xs text-slate-500 truncate">{t.email}</div></div>
+            <Button size="sm" variant="outline" onClick={async () => {
+              if (!confirm(`Reset password for ${t.email}?`)) return
+              try {
+                const r = await api.resetPassword(t.uid)
+                setCreds({ name: t.displayName, email: t.email, password: r.password })
+                toast.success('Password reset')
+              } catch (e) { toast.error(e.message) }
+            }}><KeyRound className="w-3 h-3 mr-1" />Reset PW</Button>
           </CardContent></Card>
         ))}
         {!trainers.length && <p className="text-slate-500 col-span-3 text-center py-8">No trainers yet.</p>}

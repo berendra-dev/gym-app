@@ -85,9 +85,19 @@ function Page() {
 
   const submitManual = async () => {
     if (!manualDialog || !selectedMember) return
+    // Renewal restriction: block attendance for expired memberships
+    const dateStr = manualDialog.date
+    if (selectedMember.expiryDate && dateStr > selectedMember.expiryDate) {
+      toast.error(`Cannot mark attendance — membership expired on ${selectedMember.expiryDate}. Please renew first.`)
+      return
+    }
+    if (selectedMember.status === 'inactive') {
+      toast.error('Cannot mark attendance — member is inactive.')
+      return
+    }
     setBusy(true)
     try {
-      const dateStr = manualDialog.date
+      // Doc id uniquely identifies THIS member on THIS date — cannot affect other members
       const docId = `${profile.gymId}_${selectedMember.id}_${dateStr}`
       await setDoc(doc(db, 'attendance', docId), {
         gymId: profile.gymId,
