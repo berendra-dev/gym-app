@@ -99,6 +99,8 @@ function Page() {
     try {
       // Doc id uniquely identifies THIS member on THIS date — cannot affect other members
       const docId = `${profile.gymId}_${selectedMember.id}_${dateStr}`
+      console.log('[attendance.manual] target →',
+        { gymId: profile.gymId, memberId: selectedMember.id, memberName: selectedMember.name, date: dateStr, docId, status: manualStatus })
       await setDoc(doc(db, 'attendance', docId), {
         gymId: profile.gymId,
         memberId: selectedMember.id,
@@ -140,6 +142,8 @@ function Page() {
     const existing = attendance[dateStr]
     if (!existing?._docId) return
     if (!confirm('Clear this attendance mark?')) return
+    console.log('[attendance.clear] target →',
+      { gymId: profile.gymId, memberId: selectedMember?.id, memberName: selectedMember?.name, date: dateStr, docId: existing._docId })
     await deleteDoc(doc(db, 'attendance', existing._docId))
     setAttendance(prev => { const c = { ...prev }; delete c[dateStr]; return c })
     toast.success('Cleared')

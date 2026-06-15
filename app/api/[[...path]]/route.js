@@ -122,6 +122,8 @@ async function handle(request, { params }) {
           return withCORS(NextResponse.json({ ok: false, message: `Membership expired on ${member.expiryDate}. Please renew at reception.`, name: member.name }))
         }
         const docId = `${gymId}_${member.id}_${today}`
+        console.log('[checkin.public] target →',
+          { gymId, memberId: member.id, memberName: member.name, date: today, docId, viaPhone: !!phone })
         const existing = await adminDb.collection('attendance').doc(docId).get()
         if (existing.exists && existing.data().status === 'present') {
           return withCORS(NextResponse.json({ ok: true, dupe: true, message: `Already checked in today, ${member.name}!`, name: member.name }))

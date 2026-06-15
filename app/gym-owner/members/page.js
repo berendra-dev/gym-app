@@ -119,6 +119,7 @@ function Page() {
     if (profile.role !== 'gym_owner') { toast.error('Only Gym Owner can delete members'); return }
     if (!confirm(`Permanently delete ${m.name}?`)) return
     try {
+      console.log('[member.delete] target →', { gymId: profile.gymId, memberId: m.id, memberName: m.name })
       // m.id is now guaranteed to match the Firestore doc id (setDoc with explicit id)
       await deleteDoc(doc(db, 'members', m.id))
       // Optimistically remove from UI immediately
