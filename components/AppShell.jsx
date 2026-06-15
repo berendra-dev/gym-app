@@ -22,6 +22,7 @@ const NAV = {
     { href: '/gym-owner/members', label: 'Members' },
     { href: '/gym-owner/attendance', label: 'Attendance' },
     { href: '/gym-owner/payments', label: 'Payments' },
+    { href: '/gym-owner/revenue', label: 'Revenue' },
     { href: '/gym-owner/admissions', label: 'Admissions' },
     { href: '/gym-owner/announcements', label: 'Announcements' },
     { href: '/gym-owner/trainers', label: 'Trainers' },

@@ -101,3 +101,81 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+user_problem_statement: |
+  Multi-Gym Management SaaS on Next.js + Firebase. Latest user request (Msg 388):
+  Renewal system overhaul (reactivation logic), Revenue Dashboard for Gym Owner,
+  PDF receipt generation after payment, strict RBAC for receptionist (no revenue access).
+
+backend:
+  - task: "Renewal logic — expired -> today+duration, active -> expiry+duration"
+    implemented: true
+    working: "NA"
+    file: "/app/app/gym-owner/payments/page.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Rewrote addPayment to use strict rule: max(expiryDate,today)+months. Adds wasExpired/reactivated flags. Member status forced to 'active'. Writes receiptNo on member and payment. Uses setDoc with explicit UUID for payment doc id."
+
+frontend:
+  - task: "Revenue Dashboard for Gym Owner only"
+    implemented: true
+    working: "NA"
+    file: "/app/app/gym-owner/revenue/page.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "New page with KPIs (total/this-month/last-month/growth%), active vs expired members, monthly bar chart (last 6mo), revenue by plan & mode, date-range filter, recent payments with receipt re-download. Strict RBAC via AppShell allow=['gym_owner'] — receptionist blocked."
+  - task: "PDF Receipt generation with gym logo + address + phone"
+    implemented: true
+    working: "NA"
+    file: "/app/lib/receipt.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "jsPDF + autoTable. Header has gym name/address/phone + logo (best-effort fetch as data URL). Body shows description (Renewal / Reactivation+Renewal), plan, validity (prev->new), amount. Auto-generated on save; re-download from Payments history and Revenue dashboard."
+  - task: "Payments page renewal preview + custom-months mode"
+    implemented: true
+    working: "NA"
+    file: "/app/app/gym-owner/payments/page.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Plan dropdown now sourced from subscriptionPlans collection (live onSnapshot) OR custom months. Live preview shows base-date, +N months, computed new expiry. Reactivate vs Renew label and audit action vary by wasExpired."
+
+metadata:
+  created_by: "main_agent"
+  version: "1.1"
+  test_sequence: 0
+  run_ui: false
+
+test_plan:
+  current_focus:
+    - "Renewal logic — expired -> today+duration, active -> expiry+duration"
+    - "Revenue Dashboard for Gym Owner only"
+    - "PDF Receipt generation with gym logo + address + phone"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+  - agent: "main"
+    message: |
+      Implemented P0 from user Msg 388: (1) renewal logic rule (expired -> today + duration;
+      active -> expiry + duration) with auto status='active' & reactivated flag,
+      (2) Revenue Dashboard at /gym-owner/revenue (gym_owner only),
+      (3) PDF receipts auto-generated on payment with gym logo/name/address/phone via /app/lib/receipt.js,
+      (4) added Revenue link to Gym Owner nav and dashboard tile, kept it out of receptionist nav.
+      All pages compile (200 OK), lint clean. Awaiting user verification before P1 (cron + analytics + RBAC sweep).

@@ -82,9 +82,10 @@ function Page() {
         ))}
       </div>
 
-      <div className="grid md:grid-cols-2 gap-4">
+      <div className="grid md:grid-cols-3 gap-4">
         <Link href="/gym-owner/members"><Card className="hover:shadow-md transition cursor-pointer h-full"><CardHeader><CardTitle>Manage Members</CardTitle><CardDescription>Add, view, and manage all gym members.</CardDescription></CardHeader></Card></Link>
         <Link href="/gym-owner/attendance"><Card className="hover:shadow-md transition cursor-pointer h-full"><CardHeader><CardTitle>Calendar Attendance</CardTitle><CardDescription>Mark and view attendance with color-coded calendar.</CardDescription></CardHeader></Card></Link>
+        <Link href="/gym-owner/revenue"><Card className="hover:shadow-md transition cursor-pointer h-full"><CardHeader><CardTitle>Revenue Dashboard</CardTitle><CardDescription>Track payments, reactivations & member status.</CardDescription></CardHeader></Card></Link>
       </div>
     </div>
   )
