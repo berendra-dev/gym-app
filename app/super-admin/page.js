@@ -142,6 +142,12 @@ function Page() {
         <div><h1 className="text-3xl font-bold tracking-tight">Platform Control</h1><p className="text-slate-500 mt-1">Manage gyms, subscriptions, and access.</p></div>
         <div className="flex gap-2">
         <Button variant="outline" onClick={refresh}><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
+        <Button variant="outline" onClick={async () => {
+          try {
+            const r = await api.runExpireMembers()
+            toast.success(`Auto-expired ${r.totalExpired} members across ${Object.keys(r.byGym || {}).length} gym(s)`)
+          } catch (e) { toast.error(e.message) }
+        }}><Pause className="w-4 h-4 mr-1" />Run Expire-Members</Button>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild><Button className="bg-orange-600 hover:bg-orange-700"><Plus className="w-4 h-4 mr-1" /> New Gym</Button></DialogTrigger>
           <DialogContent className="max-w-lg">

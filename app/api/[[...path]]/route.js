@@ -47,6 +47,46 @@ async function handle(request, { params }) {
       }))
     }
 
+    // -------- CRON ROUTES (bearer = CRON_SECRET) --------
+    if (route.startsWith('/cron/')) {
+      if (!adminDb) return withCORS(NextResponse.json({ error: 'server not configured' }, { status: 503 }))
+      const auth = request.headers.get('authorization') || ''
+      const token = auth.startsWith('Bearer ') ? auth.slice(7) : null
+      if (!process.env.CRON_SECRET || token !== process.env.CRON_SECRET) {
+        return withCORS(NextResponse.json({ error: 'unauthorized' }, { status: 401 }))
+      }
+
+      // POST or GET /api/cron/expire-members  — flip members past expiry to status='expired'
+      if (route === '/cron/expire-members' && (method === 'POST' || method === 'GET')) {
+        const today = new Date().toISOString().slice(0, 10)
+        const memSnap = await adminDb.collection('members').get()
+        const updates = []
+        const affectedByGym = {}
+        for (const d of memSnap.docs) {
+          const m = d.data()
+          if (!m.expiryDate || m.expiryDate >= today) continue
+          if (m.status === 'expired' || m.status === 'inactive') continue
+          updates.push(d.ref.update({ status: 'expired', expiredAt: new Date(), autoExpired: true }))
+          affectedByGym[m.gymId] = (affectedByGym[m.gymId] || 0) + 1
+        }
+        await Promise.all(updates)
+        // Audit log one entry per gym affected
+        const auditOps = Object.entries(affectedByGym).map(([gymId, count]) =>
+          adminDb.collection('auditLogs').add({
+            gymId, action: 'cron.auto_expire', targetType: 'members',
+            performedBy: 'cron', performedByRole: 'system',
+            after: { count }, timestamp: new Date(),
+          })
+        )
+        await Promise.all(auditOps)
+        return withCORS(NextResponse.json({
+          ok: true, date: today, totalExpired: updates.length, byGym: affectedByGym,
+        }))
+      }
+
+      return withCORS(NextResponse.json({ error: `cron route not found: ${route}` }, { status: 404 }))
+    }
+
     // -------- PUBLIC ROUTES (no auth — for QR flows) --------
     if (route.startsWith('/public/')) {
       if (!adminDb) return withCORS(NextResponse.json({ error: 'server not configured' }, { status: 503 }))
@@ -559,6 +599,32 @@ async function handle(request, { params }) {
           data: data ? Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)])) : undefined,
         })
         return withCORS(NextResponse.json({ ok: true, successCount: resp.successCount, failureCount: resp.failureCount }))
+      }
+
+      // POST /api/admin/cron/expire-members  — manual trigger (super_admin only)
+      if (route === '/admin/cron/expire-members' && method === 'POST') {
+        if (caller.profile?.role !== 'super_admin') return withCORS(NextResponse.json({ error: 'forbidden' }, { status: 403 }))
+        const today = new Date().toISOString().slice(0, 10)
+        const memSnap = await adminDb.collection('members').get()
+        const updates = []
+        const affectedByGym = {}
+        for (const d of memSnap.docs) {
+          const m = d.data()
+          if (!m.expiryDate || m.expiryDate >= today) continue
+          if (m.status === 'expired' || m.status === 'inactive') continue
+          updates.push(d.ref.update({ status: 'expired', expiredAt: new Date(), autoExpired: true }))
+          affectedByGym[m.gymId] = (affectedByGym[m.gymId] || 0) + 1
+        }
+        await Promise.all(updates)
+        const auditOps = Object.entries(affectedByGym).map(([gymId, count]) =>
+          adminDb.collection('auditLogs').add({
+            gymId, action: 'cron.auto_expire', targetType: 'members',
+            performedBy: caller.uid, performedByRole: 'super_admin',
+            after: { count, manual: true }, timestamp: new Date(),
+          })
+        )
+        await Promise.all(auditOps)
+        return withCORS(NextResponse.json({ ok: true, date: today, totalExpired: updates.length, byGym: affectedByGym }))
       }
 
       // POST /api/admin/single-device/enforce-logout — force-logout from all other devices

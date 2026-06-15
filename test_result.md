@@ -179,3 +179,16 @@ agent_communication:
       (3) PDF receipts auto-generated on payment with gym logo/name/address/phone via /app/lib/receipt.js,
       (4) added Revenue link to Gym Owner nav and dashboard tile, kept it out of receptionist nav.
       All pages compile (200 OK), lint clean. Awaiting user verification before P1 (cron + analytics + RBAC sweep).
+  - agent: "main"
+    message: |
+      P0 confirmed by user. Now implemented P1:
+      (1) Secured cron route POST/GET /api/cron/expire-members (Authorization: Bearer CRON_SECRET).
+          Tested: 401 on no/wrong token, 200 on correct token, totalExpired=0 on first run. CRON_SECRET added to /app/.env.
+      (2) Manual trigger POST /api/admin/cron/expire-members for Super Admin (button on Super Admin page).
+      (3) Attendance Analytics page /gym-owner/analytics (gym_owner only). KPIs (check-ins, avg/day, unique members,
+          QR vs manual), daily bar chart, top attendees ranked, inactive members tab, date range presets.
+      (4) RBAC sweep confirmed: revenue & analytics gym_owner-only; trainers/receptionists pages gym_owner-only;
+          backups/audit gym_owner+super_admin; members/attendance/payments/reports/admissions allow receptionist
+          with internal gates (delete=gym_owner only). Receptionist nav has NO revenue, analytics, profile,
+          trainers, receptionists, audit, backups.
+      All pages compile 200 OK, lint clean.
