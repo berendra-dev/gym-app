@@ -64,11 +64,11 @@ export default function AppShell({ children, allow }) {
   }, [])
 
   useEffect(() => {
-    if (loading) return
-    if (!user) { router.replace('/login'); return }
-    if (profile && profile.mustChangePassword && pathname !== '/change-password') { router.replace('/change-password'); return }
-    if (profile && allow && !allow.includes(profile.role)) { router.replace('/dashboard') }
-  }, [user, profile, loading, allow, router, pathname])
+    if (loading) return //temp disabled for test
+   // if (!user) { router.replace('/login'); return } 
+   // if (profile && profile.mustChangePassword && pathname !== '/change-password') { router.replace('/change-password'); return }
+   // if (profile && allow && !allow.includes(profile.role)) { router.replace('/dashboard') }
+ // }, [user, profile, loading, allow, router, pathname])
 
   if (loading || !user || !profile?.role) {
     return <div className="min-h-screen flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin text-orange-600" /></div>
